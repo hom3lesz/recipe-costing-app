@@ -2012,13 +2012,13 @@ function _recBuildItem(item) {
   }
   const { r, cpp, price, gp, gpCol, dotCol, alTags, cur } = item;
   const isActive = r.id === state.activeRecipeId;
-  // Staleness badge: costing data not refreshed in 60+ days
+  // Staleness badge: costing data not refreshed in 60+ days (only when date is known)
   const lastCostDate = r.lastEdited || r.createdAt;
   const daysOld = lastCostDate
     ? Math.floor((Date.now() - new Date(lastCostDate)) / 86400000)
-    : 999;
+    : null;
   const staleBadge =
-    daysOld > 60
+    daysOld !== null && daysOld > 60
       ? `<span title="Last costed ${daysOld}d ago — prices may be outdated" style="font-size:9px;font-weight:700;color:var(--red);background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:3px;padding:1px 5px;vertical-align:middle;margin-left:4px">⚠ ${daysOld}d old</span>`
       : "";
   const lockIcon = r.locked
