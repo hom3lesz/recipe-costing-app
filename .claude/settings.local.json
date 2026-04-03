@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\node_modules\\\\xlsx\\\\dist\"\" 2>/dev/null | head -10 || echo \"Not found \")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npm --version)",
+      "Bash(npm install:*)",
+      "Bash(npx jest:*)",
+      "Bash(node --check \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\src\\\\app.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\src\\\\preload.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\main.js\")",
+      "Bash(ls -la \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\src\"\" 2>/dev/null || ls -la \"C:UsersgytodDesktoprecipe-costing-app\"\")"
+    ]
+  }
+}
