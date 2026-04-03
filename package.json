@@ -1,0 +1,84 @@
+{
+  "name": "recipe-costing-app",
+  "version": "1.0.4",
+  "description": "Restaurant Recipe Costing & GP Calculator",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "jest",
+    "build": "electron-builder --win --x64",
+    "build-arm64": "electron-builder --win --arm64",
+    "build-all": "electron-builder --win --x64 --arm64",
+    "build-portable": "electron-builder --win portable --x64"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/src/__tests__/**/*.test.js"
+    ]
+  },
+  "build": {
+    "appId": "com.recipecost.app",
+    "productName": "Recipe Costing",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "hom3lesz",
+        "repo": "recipe-costing-app",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Recipe Costing",
+      "uninstallDisplayName": "Recipe Costing",
+      "deleteAppDataOnUninstall": false
+    },
+    "files": [
+      "main.js",
+      "src/**/*",
+      "!src/__tests__/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "extraMetadata": {
+      "main": "main.js"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.7",
+    "qrcode": "^1.5.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^41.1.0",
+    "electron-builder": "^26.8.1",
+    "electron-reload": "^2.0.0-alpha.1",
+    "jest": "^29.7.0"
+  }
+}
