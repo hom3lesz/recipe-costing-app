@@ -1476,7 +1476,6 @@ async function init() {
   renderSiteSelector();
   render();
   showView("home");
-  if (state.recipes.length > 0) selectRecipe(state.recipes[0].id);
   renderLocationTabBar();
   // Show PIN lock if enabled
   if (checkPinEnabled()) showPinLock();
