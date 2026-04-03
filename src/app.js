@@ -1486,6 +1486,8 @@ async function init() {
     window.electronAPI.getAppVersion().then((v) => {
       const el = document.getElementById("app-version-label");
       if (el) el.textContent = v;
+      const sidebar = document.getElementById("sidebar-version-label");
+      if (sidebar) sidebar.textContent = "v" + v;
     });
   }
 
