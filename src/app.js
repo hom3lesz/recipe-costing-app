@@ -1389,6 +1389,7 @@ async function init() {
     state.ingredients.forEach((i) => {
       if (i.seasonal === undefined) i.seasonal = false;
       if (!i.actualYield) i.actualYield = null;
+      if (i.nutrition === undefined) i.nutrition = null;
     });
     if (!state.foodCostTarget) state.foodCostTarget = 30;
     state.recipes.forEach(function (r) {
@@ -1786,6 +1787,101 @@ function recipeAllergens(recipe, _visited) {
 function suggestPrice(foodCost, gp) {
   if (gp >= 100) return 0;
   return foodCost / (1 - gp / 100);
+}
+
+// ─── Nutrition ────────────────────────────────────────────────────────────────
+function ingQtyInGrams(qty, unit) {
+  const u = (unit || "").toLowerCase();
+  if (u === "g") return qty;
+  if (u === "kg") return qty * 1000;
+  if (u === "oz") return qty * 28.3495;
+  if (u === "lb") return qty * 453.592;
+  if (u === "ml") return qty;
+  if (u === "l") return qty * 1000;
+  if (u === "fl_oz") return qty * 29.5735;
+  return null;
+}
+
+function recipeNutritionTotal(recipe, _visited) {
+  if (!recipe) return null;
+  _visited = _visited || new Set();
+  if (_visited.has(recipe.id)) return null;
+  _visited.add(recipe.id);
+  const nutr = { kcal: 0, protein: 0, fat: 0, carbs: 0, fibre: 0, salt: 0 };
+  let hasData = false;
+  let partial = false;
+  for (const ri of recipe.ingredients || []) {
+    const ing = getIngMap().get(ri.ingId);
+    if (!ing) continue;
+    if (!ing.nutrition) { partial = true; continue; }
+    let qty = ri.qty;
+    const rUnit = ri.recipeUnit || ing.unit;
+    if (rUnit !== ing.unit) qty = convertQtyToBase(ri.qty, rUnit, ing.unit);
+    const grams = ingQtyInGrams(qty, ing.unit);
+    if (grams === null) { partial = true; continue; }
+    const f = grams / 100;
+    hasData = true;
+    nutr.kcal    += (ing.nutrition.kcal    || 0) * f;
+    nutr.protein += (ing.nutrition.protein || 0) * f;
+    nutr.fat     += (ing.nutrition.fat     || 0) * f;
+    nutr.carbs   += (ing.nutrition.carbs   || 0) * f;
+    nutr.fibre   += (ing.nutrition.fibre   || 0) * f;
+    nutr.salt    += (ing.nutrition.salt    || 0) * f;
+  }
+  for (const sr of recipe.subRecipes || []) {
+    const sub = getRecipeMap().get(sr.recipeId);
+    if (!sub) continue;
+    const subTotal = recipeNutritionTotal(sub, new Set(_visited));
+    if (!subTotal) { partial = true; continue; }
+    if (subTotal.partial) partial = true;
+    hasData = true;
+    const divisor = sub.yieldQty || sub.portions || 1;
+    const f = (sr.qty || 1) / divisor;
+    nutr.kcal    += subTotal.kcal    * f;
+    nutr.protein += subTotal.protein * f;
+    nutr.fat     += subTotal.fat     * f;
+    nutr.carbs   += subTotal.carbs   * f;
+    nutr.fibre   += subTotal.fibre   * f;
+    nutr.salt    += subTotal.salt    * f;
+  }
+  if (!hasData) return null;
+  return { ...nutr, partial };
+}
+
+function buildNutritionBar(recipe) {
+  const total = recipeNutritionTotal(recipe);
+  if (!total) return "";
+  const portions = recipe.portions || 1;
+  const pp = {
+    kcal:    Math.round(total.kcal    / portions),
+    protein: (total.protein / portions).toFixed(1),
+    fat:     (total.fat     / portions).toFixed(1),
+    carbs:   (total.carbs   / portions).toFixed(1),
+    fibre:   (total.fibre   / portions).toFixed(1),
+    salt:    (total.salt    / portions).toFixed(2),
+  };
+  const cell = (val, label, col) =>
+    `<div style="display:flex;flex-direction:column;align-items:center;padding:4px 13px;border-right:1px solid var(--border)">` +
+    `<div style="font-size:13px;font-weight:700;color:${col || "var(--text-primary)"}">` + val + `</div>` +
+    `<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">` + label + `</div>` +
+    `</div>`;
+  const partialNote = total.partial
+    ? `<span title="Some ingredients missing data" style="font-size:9px;color:var(--text-muted);margin-left:4px">*partial</span>`
+    : "";
+  return (
+    `<div style="display:flex;align-items:center;background:var(--bg-card2);border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0">` +
+    `<div style="padding:0 12px;display:flex;align-items:center;gap:4px;white-space:nowrap;border-right:1px solid var(--border)">` +
+    `<span style="font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Per portion</span>` +
+    partialNote +
+    `</div>` +
+    cell(pp.kcal,           "kcal",    "var(--accent)") +
+    cell(pp.protein + "g",  "protein", "var(--green)")  +
+    cell(pp.fat     + "g",  "fat")     +
+    cell(pp.carbs   + "g",  "carbs")   +
+    cell(pp.fibre   + "g",  "fibre")   +
+    cell(pp.salt    + "g",  "salt")    +
+    `</div>`
+  );
 }
 
 // GP% → markup multiplier: e.g. 70% GP = 3.33× markup
@@ -4004,6 +4100,9 @@ function renderRecipeEditor() {
 
     <!-- Sticky live cost bar -->
     ${buildStickyCostBar(recipe, costPerPortion, sugPrice, foodCostPct)}
+
+    <!-- Nutrition bar (visible only when ingredient nutrition data exists) -->
+    ${buildNutritionBar(recipe)}
 
     <!-- Method steps panel -->
     <div class="recipe-notes-panel${(recipe.methods || []).length || recipe.notes ? " notes-has-content" : ""}">
@@ -9948,6 +10047,7 @@ function showCostHistoryModal(id) {
 // ─── QR Code ──────────────────────────────────────────────────
 
 // ─── Suppliers ─────────────────────────────────────────────────
+const _collapsedSuppliers = new Set();
 function renderSupplierList() {
   const container = document.getElementById("supplier-list-content");
   if (!container) return;
@@ -10089,6 +10189,13 @@ function renderSupplierList() {
           '<button class="btn-primary btn-sm" onclick="openInvoiceModal(\'' +
           sup.id +
           "')\">📄 Scan Invoice</button>" +
+          '<button class="btn-icon" onclick="toggleSupplierBody(\'' +
+          sup.id +
+          '\')" title="Collapse / Expand" id="sup-chev-' +
+          sup.id +
+          '" style="margin-left:2px;font-size:11px;width:26px;height:26px">' +
+          (_collapsedSuppliers.has(sup.id) ? "&#9654;" : "&#9660;") +
+          "</button>" +
           "</div></div>" +
           '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">' +
           (deliveryDays
@@ -10126,6 +10233,11 @@ function renderSupplierList() {
               "</span>"
             : "") +
           "</div></div>" +
+          '<div id="sup-body-' +
+          sup.id +
+          '"' +
+          (_collapsedSuppliers.has(sup.id) ? ' style="display:none"' : "") +
+          ">" +
           '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid var(--border)">' +
           '<div style="padding:10px 14px;border-right:1px solid var(--border)"><div style="font-size:9px;color:var(--text-muted);margin-bottom:2px;text-transform:uppercase;letter-spacing:.5px">Total spend</div><div style="font-size:17px;font-weight:700;color:var(--text-primary)">' +
           (totalSpend ? fmt(totalSpend) : "—") +
@@ -10146,6 +10258,7 @@ function renderSupplierList() {
             : '<div style="padding:10px 14px;font-size:11px;color:var(--text-muted)">No invoice history yet</div>') +
           buildSupplierCatalogue(sup) +
           buildInvoiceHistory(sup) +
+          "</div>" +
           "</div>"
         );
       })
@@ -10268,6 +10381,17 @@ function toggleSupplierCatalogue(supId) {
   const isOpen = panel.style.display !== "none";
   panel.style.display = isOpen ? "none" : "block";
   if (arrow) arrow.style.transform = isOpen ? "" : "rotate(180deg)";
+}
+
+function toggleSupplierBody(supId) {
+  const body = document.getElementById("sup-body-" + supId);
+  const chev = document.getElementById("sup-chev-" + supId);
+  if (!body) return;
+  const isOpen = body.style.display !== "none";
+  body.style.display = isOpen ? "none" : "";
+  if (isOpen) _collapsedSuppliers.add(supId);
+  else _collapsedSuppliers.delete(supId);
+  if (chev) chev.innerHTML = isOpen ? "&#9654;" : "&#9660;";
 }
 
 function buildInvoiceHistory(sup) {
@@ -11175,6 +11299,16 @@ function renderSettingsPage() {
         : '<span style="color:var(--text-muted)">No key</span>';
     }
   });
+  // USDA key
+  const usdaKeySettingsEl = document.getElementById("usda-key-input-settings");
+  if (usdaKeySettingsEl) usdaKeySettingsEl.value = getAiKey("usda");
+  const usdaStatusSettingsEl = document.getElementById("usda-key-status-settings");
+  if (usdaStatusSettingsEl) {
+    usdaStatusSettingsEl.innerHTML = getAiKey("usda")
+      ? '<span style="color:var(--green);font-weight:700">✓ Saved</span>'
+      : '<span style="color:var(--text-muted)">No key</span>';
+  }
+
   // General settings
   const currEl = document.getElementById("setting-currency");
   if (currEl) currEl.value = state.currency || "£";
@@ -11188,6 +11322,23 @@ function renderSettingsPage() {
   if (dmEl) dmEl.checked = !!state.darkMode;
   const wdEl = document.getElementById("setting-warn-duplicates");
   if (wdEl) wdEl.checked = state.warnDuplicates !== false;
+}
+
+async function saveUsdaKeySettings() {
+  const key = (document.getElementById("usda-key-input-settings")?.value || "").trim();
+  if (!key) { showToast("Key is empty — use 🗑 to clear", "error", 2000); return; }
+  _apiKeys["usda"] = key;
+  await window.electronAPI.saveApiKey("usda", key);
+  showToast("✓ USDA key saved", "success", 1500);
+  renderSettingsPage();
+}
+async function clearUsdaKeySettings() {
+  delete _apiKeys["usda"];
+  await window.electronAPI.clearApiKey("usda");
+  const inp = document.getElementById("usda-key-input-settings");
+  if (inp) inp.value = "";
+  showToast("USDA key cleared", "success", 1500);
+  renderSettingsPage();
 }
 
 function flashSettingsSaved() {
@@ -13046,6 +13197,690 @@ async function printAllergenReport() {
     "</body></html>";
 
   browserIPC.exportPDF(html);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MENU PRINT TOOL
+// ═══════════════════════════════════════════════════════════════════════════
+
+const _mpActiveFilters = new Set(); // 'gf' | 'nf' | 'df' | 'ef' | 'sf'
+
+// Derive dietary-safe tags from a recipe's allergen set
+function menuDietaryTags(recipe) {
+  const allergens = recipeAllergens(recipe);
+  const tags = [];
+  if (!allergens.includes("Cereals (Gluten)")) tags.push("GF");
+  if (!allergens.includes("Nuts") && !allergens.includes("Peanuts")) tags.push("NF");
+  if (!allergens.includes("Milk")) tags.push("DF");
+  if (!allergens.includes("Eggs")) tags.push("EF");
+  if (!allergens.includes("Crustaceans") && !allergens.includes("Molluscs")) tags.push("SF");
+  return tags;
+}
+
+function openMenuPrint() {
+  const modal = document.getElementById("menu-print-modal");
+  if (!modal) return;
+  // Populate category filter
+  const catSel = document.getElementById("mp-cat-filter");
+  if (catSel) {
+    const usedCats = [
+      ...new Set(state.recipes.map((r) => r.category).filter(Boolean)),
+    ].sort();
+    catSel.innerHTML =
+      '<option value="">All Categories</option>' +
+      usedCats
+        .map((c) => `<option value="${escHtml(c)}">${escHtml(c)}</option>`)
+        .join("");
+    catSel.value = "";
+  }
+  // Reset active filters
+  _mpActiveFilters.clear();
+  document.querySelectorAll(".mp-chip").forEach((b) => b.classList.remove("active"));
+  // Reset search
+  const searchEl = document.getElementById("mp-search");
+  if (searchEl) searchEl.value = "";
+  renderMenuPrintPreview();
+  modal.classList.remove("hidden");
+}
+
+function mpToggleFilter(key) {
+  if (_mpActiveFilters.has(key)) _mpActiveFilters.delete(key);
+  else _mpActiveFilters.add(key);
+  const btn = document.getElementById("mp-chip-" + key);
+  if (btn) btn.classList.toggle("active", _mpActiveFilters.has(key));
+  renderMenuPrintPreview();
+}
+
+function _mpFilteredRecipes() {
+  const catFilter = document.getElementById("mp-cat-filter")?.value || "";
+  const search = (document.getElementById("mp-search")?.value || "")
+    .toLowerCase()
+    .trim();
+  return state.recipes.filter((r) => {
+    if (catFilter && r.category !== catFilter) return false;
+    if (search && !r.name.toLowerCase().includes(search)) return false;
+    if (_mpActiveFilters.size > 0) {
+      const tags = menuDietaryTags(r);
+      for (const f of _mpActiveFilters) {
+        if (!tags.includes(f.toUpperCase())) return false;
+      }
+    }
+    return true;
+  });
+}
+
+function renderMenuPrintPreview() {
+  const showPrices = document.getElementById("mp-show-prices")?.checked !== false;
+  const showGP = document.getElementById("mp-show-gp")?.checked === true;
+  const groupByCat = document.getElementById("mp-group-cat")?.checked !== false;
+  const cur = state.currency || "£";
+
+  const recipes = _mpFilteredRecipes();
+
+  const countEl = document.getElementById("mp-recipe-count");
+  if (countEl)
+    countEl.textContent =
+      recipes.length + " recipe" + (recipes.length !== 1 ? "s" : "") + " selected";
+
+  const preview = document.getElementById("menu-print-preview");
+  if (!preview) return;
+
+  if (!recipes.length) {
+    preview.innerHTML =
+      '<div style="text-align:center;padding:48px 20px;color:var(--text-muted)">' +
+      '<div style="font-size:32px;margin-bottom:10px">🍽</div>' +
+      "<div>No recipes match the current filters</div></div>";
+    return;
+  }
+
+  const TAG_COLORS = {
+    GF: ["#c8960c", "#c8960c22"],
+    NF: ["#b35400", "#b3540022"],
+    DF: ["#0059b3", "#0059b322"],
+    EF: ["#8800a0", "#8800a022"],
+    SF: ["#006e30", "#006e3022"],
+  };
+
+  function recipeCard(r) {
+    const tags = menuDietaryTags(r);
+    const cpp = recipeTotalCost(r) / (r.portions || 1);
+    const price =
+      r.priceOverride ||
+      (cpp > 0 ? suggestPrice(cpp, state.activeGP || 70) : 0);
+    const gp =
+      price > 0
+        ? (((price - cpp) / price) * 100).toFixed(1)
+        : null;
+
+    const tagsHtml = tags
+      .map((t) => {
+        const [fg, bg] = TAG_COLORS[t] || ["var(--accent)", "var(--accent-bg)"];
+        return (
+          `<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;` +
+          `background:${bg};color:${fg};border:1px solid ${fg}44">${t}</span>`
+        );
+      })
+      .join("");
+
+    const notesHtml = r.notes
+      ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.5;` +
+        `overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-style:italic">` +
+        escHtml(r.notes) +
+        "</div>"
+      : "";
+
+    const priceHtml =
+      showPrices && price > 0
+        ? `<div style="font-size:16px;font-weight:800;color:var(--accent);white-space:nowrap">${cur}${price.toFixed(2)}</div>`
+        : "";
+    const gpHtml =
+      showGP && gp
+        ? `<div style="font-size:10px;color:var(--text-muted)">GP&nbsp;${gp}%</div>`
+        : "";
+
+    return (
+      `<div class="card" style="padding:13px 15px;display:flex;flex-direction:column;gap:5px">` +
+      `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">` +
+      `<div style="font-size:13px;font-weight:700;color:var(--text-primary);line-height:1.3">${escHtml(r.name)}</div>` +
+      `<div style="text-align:right;flex-shrink:0">${priceHtml}${gpHtml}</div>` +
+      `</div>` +
+      notesHtml +
+      (tags.length
+        ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:1px">${tagsHtml}</div>`
+        : "") +
+      `</div>`
+    );
+  }
+
+  let html = "";
+  if (groupByCat) {
+    const cats = [
+      ...new Set(recipes.map((r) => r.category || "Uncategorised")),
+    ].sort();
+    cats.forEach((cat) => {
+      const catRecipes = recipes.filter(
+        (r) => (r.category || "Uncategorised") === cat,
+      );
+      html +=
+        `<div style="margin-bottom:28px">` +
+        `<div style="font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;` +
+        `color:var(--text-muted);padding-bottom:6px;border-bottom:2px solid var(--border);margin-bottom:12px">` +
+        escHtml(cat) +
+        ` <span style="font-weight:400;opacity:.55">(${catRecipes.length})</span></div>` +
+        `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">` +
+        catRecipes.map(recipeCard).join("") +
+        `</div></div>`;
+    });
+  } else {
+    html =
+      `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">` +
+      recipes.map(recipeCard).join("") +
+      `</div>`;
+  }
+
+  // Legend key at the bottom
+  const allTags = [...new Set(recipes.flatMap((r) => menuDietaryTags(r)))];
+  const TAG_LABELS = {
+    GF: "Gluten Free",
+    NF: "Nut Free",
+    DF: "Dairy Free",
+    EF: "Egg Free",
+    SF: "Shellfish Free",
+  };
+  if (allTags.length) {
+    html +=
+      `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;` +
+      `margin-top:8px;padding-top:12px;border-top:1px solid var(--border);` +
+      `font-size:11px;color:var(--text-muted)">` +
+      `<span style="font-weight:600">Key:</span>` +
+      allTags
+        .map((t) => {
+          const [fg, bg] = TAG_COLORS[t] || ["var(--accent)", "var(--accent-bg)"];
+          return (
+            `<span style="display:flex;align-items:center;gap:4px">` +
+            `<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;` +
+            `background:${bg};color:${fg};border:1px solid ${fg}44">${t}</span>` +
+            escHtml(TAG_LABELS[t] || t) +
+            `</span>`
+          );
+        })
+        .join("") +
+      `</div>`;
+  }
+
+  preview.innerHTML = html;
+}
+
+async function printMenuCard() {
+  const showPrices = document.getElementById("mp-show-prices")?.checked !== false;
+  const showGP = document.getElementById("mp-show-gp")?.checked === true;
+  const groupByCat = document.getElementById("mp-group-cat")?.checked !== false;
+  const menuTitle =
+    (document.getElementById("mp-menu-title")?.value || "").trim() || "Our Menu";
+  const cur = state.currency || "£";
+
+  const recipes = _mpFilteredRecipes();
+  if (!recipes.length) {
+    showToast("No recipes to print", "error");
+    return;
+  }
+
+  const TAG_COLORS_PRINT = {
+    GF: "#a07000",
+    NF: "#924200",
+    DF: "#004fa0",
+    EF: "#750090",
+    SF: "#005c28",
+  };
+  const TAG_LABELS = {
+    GF: "Gluten Free",
+    NF: "Nut Free",
+    DF: "Dairy Free",
+    EF: "Egg Free",
+    SF: "Shellfish Free",
+  };
+
+  function buildDish(r) {
+    const tags = menuDietaryTags(r);
+    const cpp = recipeTotalCost(r) / (r.portions || 1);
+    const price =
+      r.priceOverride ||
+      (cpp > 0 ? suggestPrice(cpp, state.activeGP || 70) : 0);
+    const gp =
+      price > 0
+        ? (((price - cpp) / price) * 100).toFixed(1)
+        : null;
+
+    const badgesHtml = tags
+      .map(
+        (t) =>
+          `<span class="badge" style="color:${TAG_COLORS_PRINT[t] || "#555"};` +
+          `border-color:${TAG_COLORS_PRINT[t] || "#555"}60">${t}</span>`,
+      )
+      .join("");
+
+    return (
+      `<div class="dish">` +
+      `<div class="dish-header">` +
+      `<div class="dish-name">${escHtml(r.name)}</div>` +
+      (showPrices && price > 0
+        ? `<div class="dish-price">${cur}${price.toFixed(2)}</div>`
+        : "") +
+      `</div>` +
+      (r.notes
+        ? `<div class="dish-desc">${escHtml(r.notes)}</div>`
+        : "") +
+      (tags.length || (showGP && gp)
+        ? `<div class="dish-footer">` +
+          (tags.length ? `<div class="badges">${badgesHtml}</div>` : "<div></div>") +
+          (showGP && gp ? `<div class="dish-gp">GP ${gp}%</div>` : "") +
+          `</div>`
+        : "") +
+      `</div>`
+    );
+  }
+
+  let bodyHtml = "";
+  if (groupByCat) {
+    const cats = [
+      ...new Set(recipes.map((r) => r.category || "Other")),
+    ].sort();
+    cats.forEach((cat) => {
+      const catRecipes = recipes.filter(
+        (r) => (r.category || "Other") === cat,
+      );
+      bodyHtml +=
+        `<div class="section">` +
+        `<div class="section-title">${escHtml(cat)}</div>` +
+        `<div class="dish-grid">` +
+        catRecipes.map(buildDish).join("") +
+        `</div></div>`;
+    });
+  } else {
+    bodyHtml =
+      `<div class="section"><div class="dish-grid">` +
+      recipes.map(buildDish).join("") +
+      `</div></div>`;
+  }
+
+  const usedTags = [...new Set(recipes.flatMap((r) => menuDietaryTags(r)))];
+  const legendHtml = usedTags.length
+    ? `<div class="legend">` +
+      usedTags
+        .map(
+          (t) =>
+            `<span style="display:inline-flex;align-items:center;gap:3px">` +
+            `<span class="badge" style="color:${TAG_COLORS_PRINT[t] || "#555"};` +
+            `border-color:${TAG_COLORS_PRINT[t] || "#555"}60">${t}</span>` +
+            `${escHtml(TAG_LABELS[t] || t)}</span>`,
+        )
+        .join("") +
+      `</div>`
+    : "";
+
+  const html =
+    `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escHtml(menuTitle)}</title>` +
+    `<style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Georgia,serif;background:#fff;color:#111;padding:32px 40px;font-size:12px}
+      .menu-title{font-size:28px;font-weight:bold;text-align:center;letter-spacing:3px;text-transform:uppercase;margin-bottom:4px}
+      .menu-sub{font-size:10px;color:#999;text-align:center;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:30px;padding-bottom:14px;border-bottom:2px solid #222}
+      .section{margin-bottom:26px}
+      .section-title{font-size:11px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;color:#888;border-bottom:1px solid #ddd;padding-bottom:5px;margin-bottom:12px}
+      .dish-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      .dish{padding:11px 13px;border:1px solid #e5e5e5;border-radius:5px;display:flex;flex-direction:column;gap:4px}
+      .dish-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+      .dish-name{font-size:13px;font-weight:bold;color:#111;line-height:1.3}
+      .dish-price{font-size:14px;font-weight:bold;color:#111;white-space:nowrap;flex-shrink:0}
+      .dish-desc{font-size:11px;color:#777;line-height:1.5;font-style:italic}
+      .dish-footer{display:flex;justify-content:space-between;align-items:center;margin-top:2px}
+      .badges{display:flex;gap:3px;flex-wrap:wrap}
+      .badge{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;border:1px solid}
+      .dish-gp{font-size:10px;color:#aaa}
+      .legend{margin-top:18px;padding-top:10px;border-top:1px solid #ddd;font-size:10px;color:#888;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+      @media print{body{padding:16px 20px}}
+    </style></head><body>` +
+    `<div class="menu-title">${escHtml(menuTitle)}</div>` +
+    `<div class="menu-sub">${new Date().toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    })} &nbsp;·&nbsp; ${recipes.length} dish${recipes.length !== 1 ? "es" : ""}</div>` +
+    bodyHtml +
+    legendHtml +
+    `</body></html>`;
+
+  browserIPC.exportPDF(html);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NUTRITION SCANNER
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _nutrSource = "usda";
+let _nutrSuggestions = [];
+
+function openNutritionScanner() {
+  const modal = document.getElementById("nutr-scan-modal");
+  if (!modal) return;
+  const missing = state.ingredients.filter((i) => !i.nutrition).length;
+  const total = state.ingredients.length;
+  const missingEl = document.getElementById("nutr-scope-missing-count");
+  const allEl = document.getElementById("nutr-scope-all-count");
+  if (missingEl) missingEl.textContent = "(" + missing + " of " + total + ")";
+  if (allEl) allEl.textContent = "(" + total + ")";
+  const usdaKey = getAiKey("usda");
+  const keyInp = document.getElementById("nutr-usda-key-input");
+  if (keyInp) keyInp.value = usdaKey;
+  _nutrUpdateUsdaStatus(usdaKey);
+  _nutrUpdateAiStatus();
+  _updateNutrScanBtn();
+  nutrShowState("idle");
+  modal.classList.remove("hidden");
+}
+
+function _nutrUpdateUsdaStatus(key) {
+  const el = document.getElementById("nutr-usda-key-status");
+  if (!el) return;
+  el.innerHTML = key
+    ? '<span style="color:var(--green);font-weight:700">✓ Key saved</span>'
+    : '<span style="color:var(--text-muted)">No key saved — get a free key at fdc.nal.usda.gov</span>';
+}
+
+function _nutrUpdateAiStatus() {
+  const el = document.getElementById("nutr-ai-status");
+  if (!el) return;
+  const key = getActiveKey();
+  const model = getActiveModel();
+  const labels = {
+    claude: "Claude Sonnet",
+    "gemini-flash": "Gemini 2.5 Flash",
+    "gemini-flash-lite": "Gemini 2.5 Flash-Lite",
+  };
+  el.innerHTML = key
+    ? '<span style="color:var(--green);font-weight:700">✓ </span><span style="color:var(--text-secondary)">Will use: ' +
+      (labels[model] || model) + "</span>"
+    : '<span style="color:var(--red)">No AI key found — add one in Settings → AI Invoice Scanner</span>';
+}
+
+function _updateNutrScanBtn() {
+  const btn = document.getElementById("nutr-scan-btn");
+  if (!btn) return;
+  const scope =
+    document.querySelector('input[name="nutr-scope"]:checked')?.value || "missing";
+  const count =
+    scope === "missing"
+      ? state.ingredients.filter((i) => !i.nutrition).length
+      : state.ingredients.length;
+  const srcLabel = _nutrSource === "usda" ? "USDA" : "AI";
+  btn.textContent =
+    "🔍 Scan " + count + " ingredient" + (count !== 1 ? "s" : "") + " with " + srcLabel;
+}
+
+function nutrSelectSource(src) {
+  _nutrSource = src;
+  document.getElementById("nutr-src-usda").classList.toggle("active", src === "usda");
+  document.getElementById("nutr-src-ai").classList.toggle("active", src === "ai");
+  const usdaDot = document.getElementById("nutr-usda-dot");
+  const aiDot = document.getElementById("nutr-ai-dot");
+  if (usdaDot) {
+    usdaDot.textContent = src === "usda" ? "●" : "◎";
+    usdaDot.style.color = src === "usda" ? "var(--accent)" : "var(--text-muted)";
+  }
+  if (aiDot) {
+    aiDot.textContent = src === "ai" ? "●" : "◎";
+    aiDot.style.color = src === "ai" ? "var(--accent)" : "var(--text-muted)";
+  }
+  _updateNutrScanBtn();
+}
+
+function nutrShowState(st) {
+  ["idle", "progress", "results", "error"].forEach((s) => {
+    const el = document.getElementById("nutr-" + s);
+    if (!el) return;
+    el.style.display = s === st ? (s === "results" ? "flex" : "block") : "none";
+  });
+  const applyBtn = document.getElementById("nutr-apply-btn");
+  if (applyBtn) applyBtn.style.display = st === "results" ? "" : "none";
+}
+
+async function saveNutrUsdaKey() {
+  const key = (document.getElementById("nutr-usda-key-input")?.value || "").trim();
+  if (!key) { showToast("Key is empty", "error", 2000); return; }
+  _apiKeys["usda"] = key;
+  await window.electronAPI.saveApiKey("usda", key);
+  _nutrUpdateUsdaStatus(key);
+  _updateNutrScanBtn();
+  showToast("✓ USDA key saved", "success", 1500);
+}
+
+async function clearNutrUsdaKey() {
+  delete _apiKeys["usda"];
+  await window.electronAPI.clearApiKey("usda");
+  const inp = document.getElementById("nutr-usda-key-input");
+  if (inp) inp.value = "";
+  _nutrUpdateUsdaStatus("");
+  _updateNutrScanBtn();
+  showToast("USDA key cleared", "success", 1500);
+}
+
+async function runNutritionScan() {
+  const scope =
+    document.querySelector('input[name="nutr-scope"]:checked')?.value || "missing";
+  const ings =
+    scope === "missing"
+      ? state.ingredients.filter((i) => !i.nutrition)
+      : state.ingredients;
+  const noKeyEl = document.getElementById("nutr-idle-no-key");
+  if (!ings.length) { showToast("No ingredients to scan", "error", 2000); return; }
+  if (_nutrSource === "usda") {
+    const key = getAiKey("usda");
+    if (!key) {
+      if (noKeyEl) { noKeyEl.style.display = "block"; noKeyEl.textContent = "Please save your USDA API key first."; }
+      return;
+    }
+    if (noKeyEl) noKeyEl.style.display = "none";
+    await _runUsdaScan(ings);
+  } else {
+    const key = getActiveKey();
+    if (!key) {
+      if (noKeyEl) { noKeyEl.style.display = "block"; noKeyEl.textContent = "No AI key found — add one in Settings → AI Invoice Scanner."; }
+      return;
+    }
+    if (noKeyEl) noKeyEl.style.display = "none";
+    await _runAiNutrScan(ings);
+  }
+}
+
+async function _runUsdaScan(ings) {
+  nutrShowState("progress");
+  const bar = document.getElementById("nutr-progress-bar");
+  const txt = document.getElementById("nutr-progress-text");
+  const sub = document.getElementById("nutr-progress-sub");
+  if (bar) bar.style.width = "5%";
+  if (txt) txt.textContent = "Fetching from USDA FoodData Central…";
+  const key = getAiKey("usda");
+  const BATCH = 5;
+  const allResults = {};
+  try {
+    for (let i = 0; i < ings.length; i += BATCH) {
+      const batch = ings.slice(i, i + BATCH);
+      const pct = Math.round((i / ings.length) * 85 + 5);
+      if (bar) bar.style.width = pct + "%";
+      if (txt)
+        txt.textContent =
+          "Looking up " + Math.min(i + BATCH, ings.length) + " of " + ings.length + " ingredients…";
+      if (sub) sub.textContent = batch.map((x) => x.name).join(", ");
+      const batchRes = await window.electronAPI.fetchUsdaNutrition(
+        batch.map((x) => x.name),
+        key,
+      );
+      Object.assign(allResults, batchRes);
+    }
+    if (bar) bar.style.width = "100%";
+    if (txt) txt.textContent = "Processing results…";
+    _nutrSuggestions = ings.map((ing) => ({
+      ingId: ing.id,
+      name: ing.name,
+      current: ing.nutrition,
+      suggested: allResults[ing.name] || null,
+      matched: !!allResults[ing.name],
+      usdaFoodName: allResults[ing.name]?.foodName || null,
+    }));
+    setTimeout(_renderNutritionResults, 200);
+  } catch (e) {
+    nutrShowState("error");
+    const errEl = document.getElementById("nutr-error-msg");
+    if (errEl) errEl.textContent = "USDA error: " + (e.message || String(e));
+  }
+}
+
+async function _runAiNutrScan(ings) {
+  nutrShowState("progress");
+  const bar = document.getElementById("nutr-progress-bar");
+  const txt = document.getElementById("nutr-progress-text");
+  const sub = document.getElementById("nutr-progress-sub");
+  if (bar) bar.style.width = "10%";
+  if (txt) txt.textContent = "Sending " + ings.length + " ingredients to AI…";
+  if (sub) sub.textContent = "Building request…";
+  const model = getActiveModel();
+  const apiKey = getActiveKey();
+  const ingList = ings.map((i) => i.name).join("\n");
+  const prompt =
+    `You are a professional nutritionist. For each ingredient below, estimate the nutritional values per 100g.\n\n` +
+    `Return ONLY valid JSON — no markdown, no explanation.\n\n` +
+    `Format: {"ingredient name": {"kcal": 165, "protein": 31.0, "fat": 3.6, "carbs": 0.0, "fibre": 0.0, "salt": 0.09}, ...}\n\n` +
+    `Rules:\n- kcal = kilocalories per 100g\n- protein, fat, carbs, fibre, salt all in grams per 100g\n` +
+    `- salt = sodium × 2.5 (UK convention)\n- Use typical raw values unless name implies cooked\n` +
+    `- Round to 1 decimal place\n- If completely unknown, omit that ingredient\n\nIngredients:\n` +
+    ingList;
+  try {
+    if (bar) setTimeout(() => { if (bar) bar.style.width = "40%"; }, 600);
+    if (txt) txt.textContent = "AI is estimating nutrition for " + ings.length + " ingredients…";
+    const resultText = await window.electronAPI.callAi(model, prompt, apiKey, 8000);
+    if (bar) bar.style.width = "90%";
+    if (txt) txt.textContent = "Processing results…";
+    const clean = resultText.replace(/```json|```/g, "").trim();
+    const aiMap = JSON.parse(clean);
+    _nutrSuggestions = ings.map((ing) => {
+      let nutr = aiMap[ing.name];
+      if (!nutr) {
+        const k = Object.keys(aiMap).find(
+          (k) => k.toLowerCase() === ing.name.toLowerCase(),
+        );
+        nutr = k ? aiMap[k] : null;
+      }
+      if (nutr) nutr.source = "ai";
+      return {
+        ingId: ing.id,
+        name: ing.name,
+        current: ing.nutrition,
+        suggested: nutr || null,
+        matched: !!nutr,
+      };
+    });
+    if (bar) bar.style.width = "100%";
+    setTimeout(_renderNutritionResults, 200);
+  } catch (e) {
+    nutrShowState("error");
+    const errEl = document.getElementById("nutr-error-msg");
+    if (errEl) errEl.textContent = "AI error: " + (e.message || String(e));
+  }
+}
+
+function _renderNutritionResults() {
+  nutrShowState("results");
+  const matched = _nutrSuggestions.filter((s) => s.matched).length;
+  const notMatched = _nutrSuggestions.filter((s) => !s.matched).length;
+  const summaryEl = document.getElementById("nutr-results-summary");
+  if (summaryEl) {
+    summaryEl.innerHTML =
+      "<strong>" + matched + "</strong> ingredient" + (matched !== 1 ? "s" : "") + " matched" +
+      (notMatched
+        ? ' · <span style="color:var(--accent)">' + notMatched + " not found</span>"
+        : ' · <span style="color:var(--green)">all found ✓</span>');
+  }
+  const body = document.getElementById("nutr-results-body");
+  if (!body) return;
+  const fmt1 = (v) => (isNaN(v) ? "—" : Number(v).toFixed(1));
+  body.innerHTML = _nutrSuggestions
+    .map((s, idx) => {
+      if (!s.matched) {
+        return (
+          `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;` +
+          `border-radius:7px;background:var(--bg-card2);border:1px solid var(--border);opacity:.5">` +
+          `<span style="font-size:16px">⚠️</span>` +
+          `<div><div style="font-size:13px;font-weight:600;color:var(--text-secondary)">${escHtml(s.name)}</div>` +
+          `<div style="font-size:11px;color:var(--text-muted)">Not found — skip or add manually</div></div></div>`
+        );
+      }
+      const n = s.suggested;
+      const srcBadge =
+        n.source === "usda"
+          ? `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:rgba(91,141,238,.15);color:var(--blue);border:1px solid rgba(91,141,238,.3)">USDA</span>`
+          : `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent-dim)">AI</span>`;
+      const cells = [
+        { l: "kcal",    v: Math.round(n.kcal    || 0),              col: "var(--accent)" },
+        { l: "protein", v: fmt1(n.protein) + "g",                   col: "var(--green)" },
+        { l: "fat",     v: fmt1(n.fat)     + "g" },
+        { l: "carbs",   v: fmt1(n.carbs)   + "g" },
+        { l: "fibre",   v: fmt1(n.fibre)   + "g" },
+        { l: "salt",    v: Number(n.salt || 0).toFixed(2) + "g" },
+      ].map(
+        (c) =>
+          `<div style="text-align:center;min-width:54px">` +
+          `<div style="font-size:13px;font-weight:700;color:${c.col || "var(--text-primary)"}">` + c.v + `</div>` +
+          `<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">` + c.l + `</div></div>`,
+      ).join("");
+      return (
+        `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px;` +
+        `border-radius:7px;background:var(--bg-card2);border:1px solid var(--border)">` +
+        `<input type="checkbox" class="nutr-check" data-idx="${idx}" checked ` +
+        `style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0;margin-top:4px">` +
+        `<div style="flex:1;min-width:0">` +
+        `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">` +
+        `<div style="font-size:13px;font-weight:700;color:var(--text-primary)">${escHtml(s.name)}</div>` +
+        srcBadge +
+        (n.source === "usda" && s.usdaFoodName
+          ? `<div style="font-size:11px;color:var(--text-muted);font-style:italic">→ ${escHtml(s.usdaFoodName)}</div>`
+          : "") +
+        (s.current
+          ? `<span style="font-size:10px;color:var(--accent);padding:1px 6px;border-radius:3px;border:1px solid var(--accent-dim)">Overwrites existing</span>`
+          : "") +
+        `</div>` +
+        `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">` +
+        cells +
+        `<div style="font-size:10px;color:var(--text-muted);align-self:flex-end;padding-bottom:2px">per 100g</div>` +
+        `</div></div></div>`
+      );
+    })
+    .join("");
+}
+
+function nutrSelectAll(checked) {
+  document.querySelectorAll(".nutr-check").forEach((cb) => { cb.checked = checked; });
+}
+
+function applyNutritionSuggestions() {
+  const checks = document.querySelectorAll(".nutr-check");
+  let applied = 0;
+  checks.forEach((cb) => {
+    if (!cb.checked) return;
+    const idx = parseInt(cb.dataset.idx);
+    const s = _nutrSuggestions[idx];
+    if (!s || !s.suggested) return;
+    const ing = state.ingredients.find((i) => i.id === s.ingId);
+    if (!ing) return;
+    const { foodName, ...nutrData } = s.suggested;
+    ing.nutrition = nutrData;
+    applied++;
+  });
+  if (!applied) { showToast("No items selected", "error", 2000); return; }
+  invalidateMaps();
+  save();
+  showToast("✓ Saved nutrition for " + applied + " ingredient" + (applied !== 1 ? "s" : ""), "success", 2500);
+  document.getElementById("nutr-scan-modal").classList.add("hidden");
+  if (state.activeRecipeId) renderRecipeEditor();
 }
 
 // ─── Allergen AI Review ────────────────────────────────────────
@@ -15623,6 +16458,28 @@ function renderToolsView() {
         "",
         "",
         "openReverseCostCalc()",
+      ) +
+      toolCard(
+        "🍽",
+        "Menu Print",
+        "Filter recipes by dietary profile (GF, NF, DF, EF, SF) and print a formatted menu card with prices",
+        totalRecipes,
+        "recipe" + (totalRecipes !== 1 ? "s" : "") + " available to print",
+        "var(--accent)",
+        "openMenuPrint()",
+      ) +
+      toolCard(
+        "🥗",
+        "Nutrition Scanner",
+        "Populate kcal, protein, fat, carbs, fibre & salt for your ingredients — choose USDA database or AI",
+        (() => {
+          const withData = state.ingredients.filter(i => i.nutrition).length;
+          return withData + " / " + state.ingredients.length;
+        })(),
+        "ingredients have nutrition data",
+        state.ingredients.filter(i => i.nutrition).length === state.ingredients.length && state.ingredients.length > 0
+          ? "var(--green)" : "var(--accent)",
+        "openNutritionScanner()",
       );
   }
 
@@ -16427,6 +17284,7 @@ function applyAIMethod() {
 // Per-session order quantities keyed by ingredient id
 const _orderQtys = {};
 
+const _collapsedOrderSuppliers = new Set();
 function renderOrderSheet() {
   const cur = state.currency || "£";
   const ingredients = state.ingredients || [];
@@ -16530,17 +17388,31 @@ function renderOrderSheet() {
       supTotal += (_orderQtys[ing.id] || 0) * (ing.packCost || 0);
     });
 
+    const osCollapsed = _collapsedOrderSuppliers.has(supId);
     html += `<div class="card" style="margin-bottom:20px;overflow:hidden">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--bg-sidebar);border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--bg-sidebar);border-bottom:1px solid var(--border);cursor:pointer;user-select:none" onclick="toggleOrderSupplier('${supId}')">
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:16px">🚚</span>
           <span style="font-weight:700;font-size:14px;color:var(--text-primary)">${escHtml(supName)}</span>
           ${sup?.phone ? `<span style="font-size:11px;color:var(--text-muted)">${escHtml(sup.phone)}</span>` : ""}
           ${sup?.email ? `<span style="font-size:11px;color:var(--text-muted)">${escHtml(sup.email)}</span>` : ""}
         </div>
-        <div style="font-size:13px;font-weight:700;color:var(--accent)" id="sup-total-${supId}">${cur}${supTotal.toFixed(2)}</div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:13px;font-weight:700;color:var(--accent)" id="sup-total-${supId}">${cur}${supTotal.toFixed(2)}</div>
+          <span id="os-chev-${supId}" style="color:var(--text-muted);font-size:11px">${osCollapsed ? "&#9654;" : "&#9660;"}</span>
+        </div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <div id="os-body-${supId}"${osCollapsed ? ' style="display:none"' : ""}>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">
+        <colgroup>
+          <col style="width:24%">
+          <col style="width:12%">
+          <col style="width:11%">
+          <col style="width:11%">
+          <col style="width:10%">
+          <col style="width:13%">
+          <col style="width:19%">
+        </colgroup>
         <thead>
           <tr style="background:var(--bg-app)">
             <th style="text-align:left;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);border-bottom:1px solid var(--border)">Ingredient</th>
@@ -16588,6 +17460,7 @@ function renderOrderSheet() {
           </tr>
         </tfoot>
       </table>
+      </div>
     </div>`;
   });
 
@@ -16599,6 +17472,17 @@ function renderOrderSheet() {
   </div>`;
 
   container.innerHTML = html;
+}
+
+function toggleOrderSupplier(supId) {
+  const body = document.getElementById("os-body-" + supId);
+  const chev = document.getElementById("os-chev-" + supId);
+  if (!body) return;
+  const isOpen = body.style.display !== "none";
+  body.style.display = isOpen ? "none" : "";
+  if (isOpen) _collapsedOrderSuppliers.add(supId);
+  else _collapsedOrderSuppliers.delete(supId);
+  if (chev) chev.innerHTML = isOpen ? "&#9654;" : "&#9660;";
 }
 
 function updateOrderQty(input) {

@@ -2329,6 +2329,42 @@ input[type=range].gp-slider {
   box-shadow: 0 4px 16px rgba(0,0,0,.2);
 }
 
+/* ─── Nutrition Scanner source cards ─── */
+.nutr-src-card {
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: var(--bg-card2);
+  transition: border-color .15s, background .15s;
+  cursor: pointer;
+}
+.nutr-src-card:hover { border-color: var(--border-light); }
+.nutr-src-card.active { border-color: var(--accent); background: var(--accent-bg); }
+
+/* ─── Menu Print dietary filter chips ─── */
+.mp-chip {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-card2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all .15s;
+  font-family: var(--font);
+  letter-spacing: .4px;
+}
+.mp-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mp-chip.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
 /* ─── Data Migration Picker ─── */
 .migrate-section {
   border: 1px solid var(--border);

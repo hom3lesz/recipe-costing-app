@@ -41,6 +41,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scanInvoice: (files, prompt, model, apiKey) =>
                  ipcRenderer.invoke('scan-invoice', { files, prompt, model, apiKey }),
 
+  // ── USDA Nutrition lookup ──────────────────────────────────────
+  fetchUsdaNutrition: (names, apiKey) =>
+    ipcRenderer.invoke('fetch-usda-nutrition', { names, apiKey }),
+
   // ── Backup management ──────────────────────────────────────────
   listBackups:    ()         => ipcRenderer.invoke('list-backups'),
   restoreBackup:  (filename) => ipcRenderer.invoke('restore-backup', filename),

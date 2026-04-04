@@ -370,6 +370,25 @@ function httpsPost(hostname, urlPath, headers, body) {
   });
 }
 
+// GET helper for USDA FoodData Central (and any future REST APIs)
+function httpsGet(hostname, urlPath) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname, path: urlPath, method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    }, (res) => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Bad JSON from USDA: ' + data.slice(0, 200))); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 const AI_MODEL_WHITELIST = new Set(['claude', 'gemini-flash', 'gemini-flash-lite', 'gemini']);
 
 // Text-only AI call — routes Claude and Gemini through main process (no CORS workaround needed)
@@ -468,6 +487,51 @@ ipcMain.handle('scan-invoice', async (_, { files, prompt, model, apiKey }) => {
   }
 });
 
+// ─── USDA Nutrition lookup ────────────────────────────
+ipcMain.handle('fetch-usda-nutrition', async (_, { names, apiKey }) => {
+  if (!Array.isArray(names) || !names.length) throw new Error('No names provided.');
+  const cleanKey = (apiKey || '').trim();
+  if (!cleanKey) throw new Error('No USDA API key provided.');
+
+  // Map USDA nutrient names → our keys + conversion factors
+  const NUTR_MAP = {
+    'Energy':                        { key: 'kcal',    factor: 1         },
+    'Protein':                       { key: 'protein', factor: 1         },
+    'Total lipid (fat)':             { key: 'fat',     factor: 1         },
+    'Carbohydrate, by difference':   { key: 'carbs',   factor: 1         },
+    'Fiber, total dietary':          { key: 'fibre',   factor: 1         },
+    'Sodium, Na':                    { key: 'salt',    factor: 2.5/1000  }, // mg sodium → g salt
+  };
+
+  const results = {};
+  // Process 5 at a time concurrently
+  const BATCH = 5;
+  for (let i = 0; i < names.length; i += BATCH) {
+    const batch = names.slice(i, i + BATCH);
+    await Promise.all(batch.map(async (name) => {
+      try {
+        const q = '/fdc/v1/foods/search?query=' + encodeURIComponent(name) +
+                  '&api_key=' + encodeURIComponent(cleanKey) +
+                  '&dataType=Foundation,SR%20Legacy&pageSize=3';
+        const data = await httpsGet('api.nal.usda.gov', q);
+        const foods = data.foods || [];
+        if (!foods.length) { results[name] = null; return; }
+        const food = foods[0];
+        const nutr = { kcal: 0, protein: 0, fat: 0, carbs: 0, fibre: 0, salt: 0,
+                       source: 'usda', foodName: food.description || name };
+        (food.foodNutrients || []).forEach(n => {
+          const m = NUTR_MAP[n.nutrientName];
+          if (m) nutr[m.key] = Math.round((n.value || 0) * m.factor * 10) / 10;
+        });
+        results[name] = nutr;
+      } catch (e) {
+        results[name] = null;
+      }
+    }));
+  }
+  return results;
+});
+
 // ─── Update IPC ───────────────────────────────────────────────
 ipcMain.handle('install-update', () => {
   if (autoUpdater) autoUpdater.quitAndInstall();
@@ -522,7 +586,7 @@ ipcMain.handle('clear-api-key', (_, modelId) => {
 
 // Load all known model keys at once — used to populate the in-memory cache at startup
 ipcMain.handle('load-all-api-keys', async () => {
-  const models = ['claude', 'gemini-flash', 'gemini-flash-lite'];
+  const models = ['claude', 'gemini-flash', 'gemini-flash-lite', 'usda'];
   const result = {};
   for (const m of models) {
     try {
