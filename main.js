@@ -59,10 +59,6 @@ app.whenReady().then(() => {
 
   // Check for updates after app starts (only in packaged builds)
   if (autoUpdater && app.isPackaged) {
-    setTimeout(() => {
-      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-    }, 3000); // wait 3s after launch
-
     autoUpdater.on('update-available', (info) => {
       mainWindow?.webContents.send('update-available', info.version);
     });
@@ -70,9 +66,14 @@ app.whenReady().then(() => {
       mainWindow?.webContents.send('update-downloaded', info.version);
     });
     autoUpdater.on('error', (e) => {
+      // Swallow "no published release" errors silently — only log to console
       console.error('[updater]', e.message || e);
-      mainWindow?.webContents.send('update-error', e.message || 'Update check failed');
     });
+    setTimeout(() => {
+      // Use checkForUpdates (not checkForUpdatesAndNotify) so electron-updater
+      // doesn't show its own native notification dialogs — we handle UI ourselves
+      autoUpdater.checkForUpdates().catch(() => {});
+    }, 3000); // wait 3s after launch
   }
 });
 
