@@ -11010,6 +11010,29 @@ function getAiKey(modelId) {
 }
 
 // ─── Single source of truth for active model/key ─────────────────────────────
+function getNutrModel() {
+  const saved = localStorage.getItem("rc-nutr-model");
+  const sel = document.getElementById("nutr-model");
+  const selected = sel?.value || saved || getActiveModel();
+  if (getAiKey(selected)) {
+    localStorage.setItem("rc-nutr-model", selected);
+    return selected;
+  }
+  for (const m of AI_MODELS) { if (getAiKey(m.id)) return m.id; }
+  return selected;
+}
+function updateNutrModelUI() {
+  const sel = document.getElementById("nutr-model");
+  const model = sel?.value || getNutrModel();
+  if (sel) localStorage.setItem("rc-nutr-model", model);
+  const statusEl = document.getElementById("nutr-ai-status");
+  if (!statusEl) return;
+  const hasKey = !!getAiKey(model);
+  const isGemini = model.startsWith("gemini");
+  statusEl.innerHTML = hasKey
+    ? '<span style="color:var(--green);font-weight:700">✓ Key ready</span>'
+    : `<span style="color:var(--red)">No key — add ${isGemini ? "Gemini" : "Claude"} key in Settings</span>`;
+}
 function getActiveModel() {
   // Check persisted selection first
   const saved = localStorage.getItem("rc-active-model");
@@ -11053,6 +11076,7 @@ async function clearAiKey(modelId) {
   renderSettingsPage();
   rebuildModelDropdown();
   updateInvoiceModelUI();
+  updateNutrModelUI();
 }
 function clearInvoiceKey() {
   const model = document.getElementById("inv-model")?.value || "claude";
@@ -11076,36 +11100,39 @@ function applyAiSettings() {
   rebuildModelDropdown();
   showToast("✓ AI settings saved", "success", 1500);
 }
-function rebuildModelDropdown() {
-  const enabled = getAiEnabled();
-  const sel = document.getElementById("inv-model");
+function _populateModelSelect(sel, storageKey, onChangeFn) {
   if (!sel) return;
+  const enabled = getAiEnabled();
+  const labels = {
+    claude: "Claude Sonnet",
+    "gemini-flash": "Gemini 2.5 Flash",
+    "gemini-flash-lite": "Gemini 2.5 Flash-Lite",
+  };
   const current = sel.value;
   sel.innerHTML = "";
   AI_MODELS.forEach(function (m) {
     if (!enabled.includes(m.id)) return;
     const opt = document.createElement("option");
     opt.value = m.id;
-    const labels = {
-      claude: "Claude Sonnet",
-      "gemini-flash": "Gemini 2.5 Flash",
-      "gemini-flash-lite": "Gemini 2.5 Flash-Lite",
-    };
     opt.textContent = labels[m.id] || m.label;
     sel.appendChild(opt);
   });
-  // Restore previous selection if still available
-  const saved = localStorage.getItem("rc-active-model");
-  if (saved && [...sel.options].some((o) => o.value === saved))
-    sel.value = saved;
-  else if ([...sel.options].some((o) => o.value === current))
-    sel.value = current;
-  // Persist on change
+  const saved = localStorage.getItem(storageKey);
+  if (saved && [...sel.options].some((o) => o.value === saved)) sel.value = saved;
+  else if ([...sel.options].some((o) => o.value === current)) sel.value = current;
   sel.onchange = function () {
-    localStorage.setItem("rc-active-model", this.value);
-    updateInvoiceModelUI();
+    localStorage.setItem(storageKey, this.value);
+    onChangeFn();
   };
-  updateInvoiceModelUI();
+  onChangeFn();
+}
+function rebuildModelDropdown() {
+  _populateModelSelect(
+    document.getElementById("inv-model"), "rc-active-model", updateInvoiceModelUI
+  );
+  _populateModelSelect(
+    document.getElementById("nutr-model"), "rc-nutr-model", updateNutrModelUI
+  );
 }
 function openAiSettingsModal() {
   showView("settings");
@@ -13559,6 +13586,7 @@ async function printMenuCard() {
 
 let _nutrSource = "usda";
 let _nutrSuggestions = [];
+let _nutrResultsCache = { usda: {}, ai: {} }; // persists across scans within one modal session
 
 function openNutritionScanner() {
   const modal = document.getElementById("nutr-scan-modal");
@@ -13573,8 +13601,12 @@ function openNutritionScanner() {
   const keyInp = document.getElementById("nutr-usda-key-input");
   if (keyInp) keyInp.value = usdaKey;
   _nutrUpdateUsdaStatus(usdaKey);
-  _nutrUpdateAiStatus();
+  _populateModelSelect(
+    document.getElementById("nutr-model"), "rc-nutr-model", updateNutrModelUI
+  );
   _updateNutrScanBtn();
+  _nutrResultsCache = { usda: {}, ai: {} };
+  _nutrSuggestions = [];
   nutrShowState("idle");
   modal.classList.remove("hidden");
 }
@@ -13588,19 +13620,7 @@ function _nutrUpdateUsdaStatus(key) {
 }
 
 function _nutrUpdateAiStatus() {
-  const el = document.getElementById("nutr-ai-status");
-  if (!el) return;
-  const key = getActiveKey();
-  const model = getActiveModel();
-  const labels = {
-    claude: "Claude Sonnet",
-    "gemini-flash": "Gemini 2.5 Flash",
-    "gemini-flash-lite": "Gemini 2.5 Flash-Lite",
-  };
-  el.innerHTML = key
-    ? '<span style="color:var(--green);font-weight:700">✓ </span><span style="color:var(--text-secondary)">Will use: ' +
-      (labels[model] || model) + "</span>"
-    : '<span style="color:var(--red)">No AI key found — add one in Settings → AI Invoice Scanner</span>';
+  updateNutrModelUI();
 }
 
 function _updateNutrScanBtn() {
@@ -13719,14 +13739,13 @@ async function _runUsdaScan(ings) {
     }
     if (bar) bar.style.width = "100%";
     if (txt) txt.textContent = "Processing results…";
-    _nutrSuggestions = ings.map((ing) => ({
-      ingId: ing.id,
-      name: ing.name,
-      current: ing.nutrition,
-      suggested: allResults[ing.name] || null,
-      matched: !!allResults[ing.name],
-      usdaFoodName: allResults[ing.name]?.foodName || null,
-    }));
+    // Store in cache keyed by ingId
+    ings.forEach((ing) => {
+      if (allResults[ing.name]) {
+        _nutrResultsCache.usda[ing.id] = { ...allResults[ing.name], source: "usda" };
+      }
+    });
+    _buildNutrSuggestions();
     setTimeout(_renderNutritionResults, 200);
   } catch (e) {
     nutrShowState("error");
@@ -13735,51 +13754,68 @@ async function _runUsdaScan(ings) {
   }
 }
 
+function _parseAiNutrJson(raw) {
+  // Strip markdown fences and leading/trailing whitespace
+  let s = raw.replace(/```json|```/g, "").trim();
+  // Extract outermost {...}
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("No JSON object found in AI response");
+  s = s.slice(start, end + 1);
+  try {
+    return JSON.parse(s);
+  } catch {
+    // Truncated response — trim to last complete entry ending with `}`
+    const lastGood = s.lastIndexOf("},");
+    if (lastGood === -1) throw new Error("AI returned malformed JSON");
+    return JSON.parse(s.slice(0, lastGood + 1) + "}");
+  }
+}
+
 async function _runAiNutrScan(ings) {
   nutrShowState("progress");
   const bar = document.getElementById("nutr-progress-bar");
   const txt = document.getElementById("nutr-progress-text");
   const sub = document.getElementById("nutr-progress-sub");
-  if (bar) bar.style.width = "10%";
-  if (txt) txt.textContent = "Sending " + ings.length + " ingredients to AI…";
-  if (sub) sub.textContent = "Building request…";
-  const model = getActiveModel();
-  const apiKey = getActiveKey();
-  const ingList = ings.map((i) => i.name).join("\n");
-  const prompt =
-    `You are a professional nutritionist. For each ingredient below, estimate the nutritional values per 100g.\n\n` +
-    `Return ONLY valid JSON — no markdown, no explanation.\n\n` +
-    `Format: {"ingredient name": {"kcal": 165, "protein": 31.0, "fat": 3.6, "carbs": 0.0, "fibre": 0.0, "salt": 0.09}, ...}\n\n` +
-    `Rules:\n- kcal = kilocalories per 100g\n- protein, fat, carbs, fibre, salt all in grams per 100g\n` +
-    `- salt = sodium × 2.5 (UK convention)\n- Use typical raw values unless name implies cooked\n` +
-    `- Round to 1 decimal place\n- If completely unknown, omit that ingredient\n\nIngredients:\n` +
-    ingList;
+  if (bar) bar.style.width = "5%";
+  const model = getNutrModel();
+  const apiKey = getAiKey(model);
+  const BATCH = 25;
+  const allAiMap = {};
   try {
-    if (bar) setTimeout(() => { if (bar) bar.style.width = "40%"; }, 600);
-    if (txt) txt.textContent = "AI is estimating nutrition for " + ings.length + " ingredients…";
-    const resultText = await window.electronAPI.callAi(model, prompt, apiKey, 8000);
-    if (bar) bar.style.width = "90%";
+    for (let i = 0; i < ings.length; i += BATCH) {
+      const batch = ings.slice(i, i + BATCH);
+      const pct = Math.round((i / ings.length) * 85 + 5);
+      if (bar) bar.style.width = pct + "%";
+      if (txt) txt.textContent = "AI estimating " + Math.min(i + BATCH, ings.length) + " of " + ings.length + " ingredients…";
+      if (sub) sub.textContent = batch.map((x) => x.name).join(", ");
+      const ingList = batch.map((x) => x.name).join("\n");
+      const prompt =
+        `You are a professional nutritionist. For each ingredient below, estimate the nutritional values per 100g.\n\n` +
+        `Return ONLY valid JSON — no markdown, no explanation.\n\n` +
+        `Format: {"ingredient name": {"kcal": 165, "protein": 31.0, "fat": 3.6, "carbs": 0.0, "fibre": 0.0, "salt": 0.09}, ...}\n\n` +
+        `Rules:\n- kcal = kilocalories per 100g\n- protein, fat, carbs, fibre, salt all in grams per 100g\n` +
+        `- salt = sodium × 2.5 (UK convention)\n- Use typical raw values unless name implies cooked\n` +
+        `- Round to 1 decimal place\n- If completely unknown, omit that ingredient\n\nIngredients:\n` +
+        ingList;
+      const resultText = await window.electronAPI.callAi(model, prompt, apiKey, 4000);
+      const batchMap = _parseAiNutrJson(resultText);
+      Object.assign(allAiMap, batchMap);
+    }
+    if (bar) bar.style.width = "100%";
     if (txt) txt.textContent = "Processing results…";
-    const clean = resultText.replace(/```json|```/g, "").trim();
-    const aiMap = JSON.parse(clean);
-    _nutrSuggestions = ings.map((ing) => {
-      let nutr = aiMap[ing.name];
+    // Store in cache keyed by ingId
+    ings.forEach((ing) => {
+      let nutr = allAiMap[ing.name];
       if (!nutr) {
-        const k = Object.keys(aiMap).find(
+        const k = Object.keys(allAiMap).find(
           (k) => k.toLowerCase() === ing.name.toLowerCase(),
         );
-        nutr = k ? aiMap[k] : null;
+        nutr = k ? allAiMap[k] : null;
       }
-      if (nutr) nutr.source = "ai";
-      return {
-        ingId: ing.id,
-        name: ing.name,
-        current: ing.nutrition,
-        suggested: nutr || null,
-        matched: !!nutr,
-      };
+      if (nutr) _nutrResultsCache.ai[ing.id] = { ...nutr, source: "ai" };
     });
-    if (bar) bar.style.width = "100%";
+    _buildNutrSuggestions();
     setTimeout(_renderNutritionResults, 200);
   } catch (e) {
     nutrShowState("error");
@@ -13788,73 +13824,154 @@ async function _runAiNutrScan(ings) {
   }
 }
 
+function _buildNutrSuggestions() {
+  const allIds = new Set([
+    ...Object.keys(_nutrResultsCache.usda),
+    ...Object.keys(_nutrResultsCache.ai),
+  ]);
+  // Preserve any choices the user already toggled
+  const existingChoices = {};
+  _nutrSuggestions.forEach((s) => { existingChoices[s.ingId] = s.choice; });
+  _nutrSuggestions = [...allIds].map((id) => {
+    const ing = state.ingredients.find((i) => i.id === id);
+    if (!ing) return null;
+    const usda = _nutrResultsCache.usda[id] || null;
+    const ai = _nutrResultsCache.ai[id] || null;
+    let choice = existingChoices[id];
+    // If no choice yet, or chosen source no longer available, pick best available
+    if (!choice || !(choice === "usda" ? usda : ai)) {
+      choice = usda ? "usda" : ai ? "ai" : null;
+    }
+    return {
+      ingId: id, name: ing.name, current: ing.nutrition,
+      usda, ai, usdaFoodName: usda?.foodName || null,
+      choice, matched: !!(usda || ai),
+    };
+  }).filter(Boolean);
+  _nutrSuggestions.sort((a, b) => {
+    if (a.matched !== b.matched) return a.matched ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function nutrToggleChoice(idx, src) {
+  if (_nutrSuggestions[idx]) _nutrSuggestions[idx].choice = src;
+  _renderNutritionResults();
+}
+
+function nutrAddSourceScan(src) {
+  _nutrSource = src;
+  runNutritionScan();
+}
+
 function _renderNutritionResults() {
   nutrShowState("results");
   const matched = _nutrSuggestions.filter((s) => s.matched).length;
   const notMatched = _nutrSuggestions.filter((s) => !s.matched).length;
+  const hasUsda = Object.keys(_nutrResultsCache.usda).length > 0;
+  const hasAi = Object.keys(_nutrResultsCache.ai).length > 0;
   const summaryEl = document.getElementById("nutr-results-summary");
   if (summaryEl) {
+    const parts = [];
+    if (hasUsda) parts.push(`<span style="color:var(--blue);font-weight:700">USDA: ${Object.keys(_nutrResultsCache.usda).length}</span>`);
+    if (hasAi) parts.push(`<span style="color:var(--accent);font-weight:700">AI: ${Object.keys(_nutrResultsCache.ai).length}</span>`);
     summaryEl.innerHTML =
-      "<strong>" + matched + "</strong> ingredient" + (matched !== 1 ? "s" : "") + " matched" +
+      "<strong>" + matched + "</strong> matched (" + parts.join(" · ") + ")" +
       (notMatched
         ? ' · <span style="color:var(--accent)">' + notMatched + " not found</span>"
         : ' · <span style="color:var(--green)">all found ✓</span>');
   }
+  // Show add-source buttons in the toolbar
+  const addUsdaBtn = document.getElementById("nutr-add-usda-btn");
+  const addAiBtn = document.getElementById("nutr-add-ai-btn");
+  if (addUsdaBtn) addUsdaBtn.style.display = !hasUsda && getAiKey("usda") ? "" : "none";
+  if (addAiBtn) addAiBtn.style.display = !hasAi && getActiveKey() ? "" : "none";
+
   const body = document.getElementById("nutr-results-body");
   if (!body) return;
   const fmt1 = (v) => (isNaN(v) ? "—" : Number(v).toFixed(1));
-  body.innerHTML = _nutrSuggestions
-    .map((s, idx) => {
-      if (!s.matched) {
-        return (
-          `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;` +
-          `border-radius:7px;background:var(--bg-card2);border:1px solid var(--border);opacity:.5">` +
-          `<span style="font-size:16px">⚠️</span>` +
-          `<div><div style="font-size:13px;font-weight:600;color:var(--text-secondary)">${escHtml(s.name)}</div>` +
-          `<div style="font-size:11px;color:var(--text-muted)">Not found — skip or add manually</div></div></div>`
-        );
-      }
-      const n = s.suggested;
-      const srcBadge =
-        n.source === "usda"
-          ? `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:rgba(91,141,238,.15);color:var(--blue);border:1px solid rgba(91,141,238,.3)">USDA</span>`
-          : `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent-dim)">AI</span>`;
-      const cells = [
-        { l: "kcal",    v: Math.round(n.kcal    || 0),              col: "var(--accent)" },
-        { l: "protein", v: fmt1(n.protein) + "g",                   col: "var(--green)" },
-        { l: "fat",     v: fmt1(n.fat)     + "g" },
-        { l: "carbs",   v: fmt1(n.carbs)   + "g" },
-        { l: "fibre",   v: fmt1(n.fibre)   + "g" },
-        { l: "salt",    v: Number(n.salt || 0).toFixed(2) + "g" },
-      ].map(
-        (c) =>
-          `<div style="text-align:center;min-width:54px">` +
-          `<div style="font-size:13px;font-weight:700;color:${c.col || "var(--text-primary)"}">` + c.v + `</div>` +
-          `<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">` + c.l + `</div></div>`,
-      ).join("");
+
+  const renderCells = (n) => [
+    { l: "kcal",    v: Math.round(n.kcal    || 0), col: "var(--accent)" },
+    { l: "protein", v: fmt1(n.protein) + "g",      col: "var(--green)" },
+    { l: "fat",     v: fmt1(n.fat)     + "g" },
+    { l: "carbs",   v: fmt1(n.carbs)   + "g" },
+    { l: "fibre",   v: fmt1(n.fibre)   + "g" },
+    { l: "salt",    v: Number(n.salt || 0).toFixed(2) + "g" },
+  ].map((c) =>
+    `<div style="text-align:center;min-width:54px">` +
+    `<div style="font-size:13px;font-weight:700;color:${c.col || "var(--text-primary)"}">` + c.v + `</div>` +
+    `<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">` + c.l + `</div></div>`
+  ).join("");
+
+  const srcBadge = (src) => src === "usda"
+    ? `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:rgba(91,141,238,.15);color:var(--blue);border:1px solid rgba(91,141,238,.3)">USDA</span>`
+    : `<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent-dim)">AI</span>`;
+
+  body.innerHTML = _nutrSuggestions.map((s, idx) => {
+    if (!s.matched) {
       return (
-        `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px;` +
-        `border-radius:7px;background:var(--bg-card2);border:1px solid var(--border)">` +
-        `<input type="checkbox" class="nutr-check" data-idx="${idx}" checked ` +
-        `style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0;margin-top:4px">` +
-        `<div style="flex:1;min-width:0">` +
-        `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">` +
-        `<div style="font-size:13px;font-weight:700;color:var(--text-primary)">${escHtml(s.name)}</div>` +
-        srcBadge +
-        (n.source === "usda" && s.usdaFoodName
-          ? `<div style="font-size:11px;color:var(--text-muted);font-style:italic">→ ${escHtml(s.usdaFoodName)}</div>`
-          : "") +
-        (s.current
-          ? `<span style="font-size:10px;color:var(--accent);padding:1px 6px;border-radius:3px;border:1px solid var(--accent-dim)">Overwrites existing</span>`
-          : "") +
-        `</div>` +
-        `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">` +
-        cells +
-        `<div style="font-size:10px;color:var(--text-muted);align-self:flex-end;padding-bottom:2px">per 100g</div>` +
-        `</div></div></div>`
+        `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;` +
+        `border-radius:7px;background:var(--bg-card2);border:1px solid var(--border);opacity:.5">` +
+        `<span style="font-size:16px">⚠️</span>` +
+        `<div><div style="font-size:13px;font-weight:600;color:var(--text-secondary)">${escHtml(s.name)}</div>` +
+        `<div style="font-size:11px;color:var(--text-muted)">Not found — skip or add manually</div></div></div>`
       );
-    })
-    .join("");
+    }
+    const hasBoth = !!(s.usda && s.ai);
+    const chosenData = s.choice === "usda" ? s.usda : s.ai;
+    let valuesHtml;
+    if (hasBoth) {
+      const otherSrc = s.choice === "usda" ? "ai" : "usda";
+      const otherData = s[otherSrc];
+      const usdaActive = s.choice === "usda";
+      const toggleHtml =
+        `<div style="display:flex;gap:4px;margin-bottom:10px;align-items:center">` +
+        `<span style="font-size:11px;color:var(--text-muted);margin-right:2px">Use:</span>` +
+        `<button onclick="nutrToggleChoice(${idx},'usda')" style="font-size:11px;font-weight:700;padding:2px 10px;border-radius:4px;` +
+        `border:1px solid ${usdaActive ? "var(--blue)" : "var(--border)"};` +
+        `background:${usdaActive ? "rgba(91,141,238,.15)" : "transparent"};` +
+        `color:${usdaActive ? "var(--blue)" : "var(--text-muted)"};cursor:pointer">🏛 USDA</button>` +
+        `<button onclick="nutrToggleChoice(${idx},'ai')" style="font-size:11px;font-weight:700;padding:2px 10px;border-radius:4px;` +
+        `border:1px solid ${!usdaActive ? "var(--accent)" : "var(--border)"};` +
+        `background:${!usdaActive ? "var(--accent-bg)" : "transparent"};` +
+        `color:${!usdaActive ? "var(--accent)" : "var(--text-muted)"};cursor:pointer">✨ AI</button>` +
+        `</div>`;
+      valuesHtml = toggleHtml +
+        `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">` +
+        renderCells(chosenData) +
+        `<div style="font-size:10px;color:var(--text-muted);align-self:flex-end;padding-bottom:2px">per 100g</div></div>` +
+        `<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;padding:5px 8px;` +
+        `border-radius:5px;background:var(--bg-app);border:1px solid var(--border);opacity:.5">` +
+        srcBadge(otherSrc) +
+        `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-left:4px">` +
+        renderCells(otherData) + `</div></div>`;
+    } else {
+      valuesHtml =
+        `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">` +
+        renderCells(chosenData) +
+        `<div style="font-size:10px;color:var(--text-muted);align-self:flex-end;padding-bottom:2px">per 100g</div></div>`;
+    }
+    return (
+      `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px;` +
+      `border-radius:7px;background:var(--bg-card2);border:1px solid var(--border)">` +
+      `<input type="checkbox" class="nutr-check" data-idx="${idx}" checked ` +
+      `style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0;margin-top:4px">` +
+      `<div style="flex:1;min-width:0">` +
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">` +
+      `<div style="font-size:13px;font-weight:700;color:var(--text-primary)">${escHtml(s.name)}</div>` +
+      (!hasBoth ? srcBadge(s.choice) : "") +
+      (s.usdaFoodName
+        ? `<div style="font-size:11px;color:var(--text-muted);font-style:italic">→ ${escHtml(s.usdaFoodName)}</div>`
+        : "") +
+      (s.current
+        ? `<span style="font-size:10px;color:var(--accent);padding:1px 6px;border-radius:3px;border:1px solid var(--accent-dim)">Overwrites existing</span>`
+        : "") +
+      `</div>` +
+      valuesHtml +
+      `</div></div>`
+    );
+  }).join("");
 }
 
 function nutrSelectAll(checked) {
@@ -13868,10 +13985,12 @@ function applyNutritionSuggestions() {
     if (!cb.checked) return;
     const idx = parseInt(cb.dataset.idx);
     const s = _nutrSuggestions[idx];
-    if (!s || !s.suggested) return;
+    if (!s || !s.choice) return;
+    const nutrRaw = s.choice === "usda" ? s.usda : s.ai;
+    if (!nutrRaw) return;
     const ing = state.ingredients.find((i) => i.id === s.ingId);
     if (!ing) return;
-    const { foodName, ...nutrData } = s.suggested;
+    const { foodName, ...nutrData } = nutrRaw;
     ing.nutrition = nutrData;
     applied++;
   });

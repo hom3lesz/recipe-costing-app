@@ -1299,8 +1299,16 @@
               <div style="font-size:13px;font-weight:700;color:var(--text-primary)">AI (Claude / Gemini)</div>
               <span id="nutr-ai-dot" style="margin-left:auto;font-size:15px;color:var(--text-muted)">◎</span>
             </div>
-            <div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-bottom:10px">Uses your active AI model to estimate values. ⚠ Estimates only — good for guidance, not clinical use.</div>
-            <div id="nutr-ai-status" style="font-size:11px;color:var(--text-muted);padding:8px 10px;background:var(--bg-app);border:1px solid var(--border);border-radius:5px">Checking AI key…</div>
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-bottom:8px">Uses your chosen AI model to estimate values. ⚠ Estimates only — good for guidance, not clinical use.</div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px" onclick="event.stopPropagation()">
+              <select id="nutr-model" onchange="updateNutrModelUI()" style="flex:1;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:4px 7px;border-radius:4px;outline:none">
+                <option value="claude">Claude Sonnet</option>
+                <option value="gemini-flash">Gemini 2.5 Flash</option>
+                <option value="gemini-flash-lite">Gemini 2.5 Flash-Lite</option>
+              </select>
+              <button class="btn-secondary btn-sm" onclick="showView('settings')" style="white-space:nowrap;font-size:11px">⚙ Keys</button>
+            </div>
+            <div id="nutr-ai-status" style="font-size:11px;color:var(--text-muted)">Checking AI key…</div>
           </div>
         </div>
         <!-- Scope -->
@@ -1334,8 +1342,10 @@
 
       <!-- RESULTS -->
       <div id="nutr-results" style="display:none;flex-direction:column;flex:1;overflow:hidden">
-        <div style="padding:10px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;background:var(--bg-sidebar)">
-          <div id="nutr-results-summary" style="flex:1;font-size:12px;color:var(--text-secondary)"></div>
+        <div style="padding:10px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;background:var(--bg-sidebar);flex-wrap:wrap">
+          <div id="nutr-results-summary" style="flex:1;font-size:12px;color:var(--text-secondary);min-width:0"></div>
+          <button id="nutr-add-usda-btn" class="btn-secondary btn-sm" onclick="nutrAddSourceScan('usda')" style="display:none">🏛 Add USDA</button>
+          <button id="nutr-add-ai-btn" class="btn-secondary btn-sm" onclick="nutrAddSourceScan('ai')" style="display:none">✨ Add AI</button>
           <button class="btn-secondary btn-sm" onclick="nutrSelectAll(true)">Select all</button>
           <button class="btn-secondary btn-sm" onclick="nutrSelectAll(false)">Deselect all</button>
         </div>
