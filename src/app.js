@@ -3908,6 +3908,10 @@ function getActiveRecipe() {
 
 // ─── Recipe Editor ────────────────────────────────────────────
 function renderRecipeEditor() {
+  // Always start with a clean cost cache so stale values from a previous render
+  // (e.g. before an ingredient was added/removed) never bleed into this render.
+  invalidateMaps();
+  invalidateCostCache();
   const recipe = getActiveRecipe();
   const editor = document.getElementById("recipe-editor");
   if (!recipe) {
@@ -9661,8 +9665,13 @@ function recipeNutrition(recipe) {
 }
 
 function buildNutritionSummary(recipe) {
-  const n = recipeNutrition(recipe);
-  if (!n.kcal && !n.protein && !n.fat && !n.carbs) return "";
+  // Use recipeNutritionTotal — same function as the header bar — so both
+  // panels always show identical values (correct unit conversion + sub-recipes).
+  const n = recipeNutritionTotal(recipe);
+  if (!n || (!n.kcal && !n.protein && !n.fat && !n.carbs)) return "";
+  const partial = n.partial
+    ? '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">*partial — some ingredients missing data</div>'
+    : "";
   return (
     '<div class="nutrition-card">' +
     '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Nutrition / Portion</div>' +
@@ -9679,7 +9688,9 @@ function buildNutritionSummary(recipe) {
     '<div class="nut-item"><div class="nut-val">' +
     n.carbs.toFixed(1) +
     'g</div><div class="nut-lbl">Carbs</div></div>' +
-    "</div></div>"
+    "</div>" +
+    partial +
+    "</div>"
   );
 }
 
