@@ -3439,24 +3439,12 @@ function renderLocationTabBar() {
   if (!state.locations) state.locations = [];
   const locs = state.locations;
 
-  // Hide the bar when there are 0 or 1 locations — no switching needed
+  // Only show the tab bar when there are 2+ locations to switch between
   if (locs.length <= 1) {
     bar.style.display = "none";
     return;
   }
   bar.style.display = "flex";
-
-  if (!locs.length) {
-    // No locations set up — show a single "Default" tab + add button
-    bar.innerHTML =
-      `<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;background:var(--accent-bg);border:1px solid var(--accent-dim)">
-        <span style="font-size:10px;color:var(--accent)">●</span>
-        <span style="font-size:12px;font-weight:600;color:var(--accent)">Default</span>
-        <span style="font-size:10px;color:var(--text-muted)">${state.recipes.filter((r) => !r.yieldQty).length} recipes</span>
-      </div>` +
-      `<button class="loc-tab loc-tab-add" onclick="openLocationManager()" title="Set up locations for Polo Bar, PlatterUP etc.">+ Add location</button>`;
-    return;
-  }
 
   bar.innerHTML =
     locs
@@ -12308,6 +12296,12 @@ function renderSettingsPage() {
   renderPinStatus();
   loadBackupList();
   _renderSyncUI();
+  // Location count
+  const locCountEl = document.getElementById("settings-loc-count");
+  if (locCountEl) {
+    const lc = (state.locations || []).length;
+    locCountEl.textContent = lc ? lc + " location" + (lc !== 1 ? "s" : "") + " configured" : "No locations yet — using default";
+  }
   // AI models
   const enabled = getAiEnabled();
   AI_MODELS.forEach(function (m) {
