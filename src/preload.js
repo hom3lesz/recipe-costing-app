@@ -49,6 +49,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listBackups:    ()         => ipcRenderer.invoke('list-backups'),
   restoreBackup:  (filename) => ipcRenderer.invoke('restore-backup', filename),
 
+  // ── Cloud Sync / Folder Backup ─────────────────────────────────
+  chooseSyncFolder:   ()                  => ipcRenderer.invoke('choose-sync-folder'),
+  syncBackupToFolder: (folderPath, data)  => ipcRenderer.invoke('sync-backup-to-folder', { folderPath, data }),
+  listSyncBackups:    (folderPath)        => ipcRenderer.invoke('list-sync-backups', folderPath),
+  restoreSyncBackup:  (folderPath, fname) => ipcRenderer.invoke('restore-sync-backup', { folderPath, filename: fname }),
+  openFolder:         (folderPath)        => ipcRenderer.invoke('open-folder', folderPath),
+
   // ── Update error notifications ─────────────────────────────────
   onUpdateError: (cb) => ipcRenderer.on('update-error', (_, msg) => cb(msg)),
 

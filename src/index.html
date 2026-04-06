@@ -210,6 +210,7 @@
             <option value="gp">GP % ↓</option>
           </select>
         </div>
+        <div id="rl-tag-bar" style="display:none;padding:4px 16px 6px;gap:5px;flex-wrap:wrap;align-items:center;flex-shrink:0"></div>
         <!-- Recipe bulk action bar -->
         <div id="rl-bulk-bar" style="display:none;align-items:center;gap:10px;padding:8px 16px;background:var(--accent-bg);border-bottom:1px solid var(--accent);flex-shrink:0;flex-wrap:wrap">
           <span id="rl-bulk-count" style="font-size:12px;font-weight:700;color:var(--accent)">0 selected</span>
@@ -369,6 +370,8 @@
           <button class="btn-secondary" onclick="openMarginHeatmap()" title="GP% heatmap across all recipes">🌡 Margin Heatmap</button>
           <button class="btn-secondary" onclick="openReverseCostCalc()">🧮 Reverse Costing</button>
           <button class="btn-secondary" onclick="exportAllRecipesExcel()">📥 Export Excel</button>
+          <button class="btn-secondary" onclick="exportDashboardPDF()" title="Export dashboard summary as PDF">📄 Dashboard PDF</button>
+          <button class="btn-secondary" onclick="exportBatchPDF()" title="Export all recipes as a single multi-page PDF">📑 All Recipes PDF</button>
         </div>
       </div>
       <div style="padding:8px 28px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0">
@@ -621,6 +624,35 @@
         </div>
         <div id="backup-list-status" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
         <div id="backup-list" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+
+      <!-- Cloud Sync / Folder Backup -->
+      <div class="card" style="max-width:720px;margin-bottom:24px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">☁ Cloud Sync & Folder Backup</div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
+          Choose a cloud sync folder (Google Drive, Dropbox, OneDrive, or any folder) to automatically back up your data.
+          Backups are saved as JSON files on each manual sync or automatically when enabled.
+        </p>
+
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <button class="btn-primary btn-sm" onclick="chooseSyncFolder()">📂 Choose Folder</button>
+          <span id="sync-folder-path" style="font-size:11px;color:var(--text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No folder selected</span>
+          <button class="btn-secondary btn-sm" onclick="openSyncFolder()" id="btn-open-sync-folder" style="display:none">📁 Open</button>
+        </div>
+
+        <div id="sync-controls" style="display:none">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+            <button class="btn-primary btn-sm" onclick="runSyncNow()">⬆ Sync Now</button>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="sync-auto-toggle" onchange="toggleAutoSync()" style="accent-color:var(--accent)">
+              <span style="font-size:12px;color:var(--text-secondary)">Auto-sync on save</span>
+            </label>
+            <button class="btn-secondary btn-sm" onclick="clearSyncFolder()" style="font-size:11px;color:var(--red)">✕ Disconnect</button>
+          </div>
+
+          <div id="sync-status" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
+          <div id="sync-backup-list" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
       </div>
 
       <!-- AI Invoice Scanner -->
@@ -1576,25 +1608,35 @@
         <div class="shortcuts-section">
           <div class="shortcuts-section-title">Global</div>
           <div class="shortcut-row"><kbd>Ctrl K</kbd><span>Open search</span></div>
+          <div class="shortcut-row"><kbd>Ctrl ,</kbd><span>Open settings</span></div>
+          <div class="shortcut-row"><kbd>Ctrl Shift L</kbd><span>Toggle light / dark</span></div>
           <div class="shortcut-row"><kbd>N</kbd><span>New recipe</span></div>
           <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
         </div>
         <div class="shortcuts-section">
+          <div class="shortcuts-section-title">Navigation</div>
+          <div class="shortcut-row"><kbd>1</kbd><span>Home</span></div>
+          <div class="shortcut-row"><kbd>2</kbd><span>Recipes</span></div>
+          <div class="shortcut-row"><kbd>3</kbd><span>Ingredient Library</span></div>
+          <div class="shortcut-row"><kbd>4</kbd><span>Suppliers</span></div>
+          <div class="shortcut-row"><kbd>5</kbd><span>Dashboard</span></div>
+          <div class="shortcut-row"><kbd>6</kbd><span>Tools</span></div>
+          <div class="shortcut-row"><kbd>7</kbd><span>Order Sheet</span></div>
+        </div>
+        <div class="shortcuts-section">
           <div class="shortcuts-section-title">Recipe Editor</div>
+          <div class="shortcut-row"><kbd>Ctrl I</kbd><span>Add ingredient</span></div>
+          <div class="shortcut-row"><kbd>Ctrl D</kbd><span>Duplicate recipe</span></div>
+          <div class="shortcut-row"><kbd>Ctrl P</kbd><span>Print cost sheet</span></div>
           <div class="shortcut-row"><kbd>Ctrl Z</kbd><span>Undo</span></div>
           <div class="shortcut-row"><kbd>Ctrl Y</kbd><span>Redo</span></div>
           <div class="shortcut-row"><kbd>Ctrl ↵</kbd><span>Save recipe</span></div>
           <div class="shortcut-row"><kbd>Esc</kbd><span>Deselect field / discard</span></div>
         </div>
         <div class="shortcuts-section">
-          <div class="shortcuts-section-title">Ingredient Modal</div>
-          <div class="shortcut-row"><kbd>↵</kbd><span>Save ingredient</span></div>
-          <div class="shortcut-row"><kbd>Esc</kbd><span>Close modal</span></div>
-        </div>
-        <div class="shortcuts-section">
-          <div class="shortcuts-section-title">Confirm Dialogs</div>
-          <div class="shortcut-row"><kbd>↵</kbd><span>Confirm</span></div>
-          <div class="shortcut-row"><kbd>Esc</kbd><span>Cancel</span></div>
+          <div class="shortcuts-section-title">Modals</div>
+          <div class="shortcut-row"><kbd>↵</kbd><span>Save / confirm</span></div>
+          <div class="shortcut-row"><kbd>Esc</kbd><span>Close / cancel</span></div>
         </div>
       </div>
     </div>
@@ -1698,7 +1740,7 @@
 </div>
 
 <!-- Supplier Comparison Modal -->
-<div id="sup-compare-modal" class="modal-overlay hidden">
+<div id="sup-compare-modal" class="modal-overlay hidden" style="z-index:600">
   <div class="modal" style="width:720px;max-height:85vh;display:flex;flex-direction:column">
     <div class="modal-header">
       <div>

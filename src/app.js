@@ -1952,6 +1952,8 @@ async function save() {
       activeLocationId: state.activeLocationId,
     });
     _setSaveIndicator("saved");
+    // Auto-sync to cloud folder if enabled
+    _autoSyncToCloud();
   } catch (e) {
     _setSaveIndicator("error");
     showToast(
@@ -1961,6 +1963,36 @@ async function save() {
     );
     console.error("[save]", e);
   }
+}
+
+let _autoSyncDebounce = null;
+function _autoSyncToCloud() {
+  try {
+    const s = _getSyncSettings();
+    if (!s.folder || !s.autoSync) return;
+    // Debounce: only sync at most once per 30 seconds
+    if (_autoSyncDebounce) return;
+    _autoSyncDebounce = setTimeout(function() { _autoSyncDebounce = null; }, 30000);
+    const data = {
+      recipes: state.recipes,
+      ingredients: state.ingredients,
+      suppliers: state.suppliers,
+      settings: {
+        currency: state.currency,
+        activeGP: state.activeGP,
+        vatRate: state.vatRate,
+        recipeCategories: state.recipeCategories
+      },
+      exportDate: new Date().toISOString(),
+      version: state.version || '0.0.12'
+    };
+    window.electronAPI.syncBackupToFolder(s.folder, data).then(function(res) {
+      if (res && !res.error) {
+        s.lastSync = new Date().toISOString();
+        _saveSyncSettings(s);
+      }
+    }).catch(function() {});
+  } catch(e) { /* silent */ }
 }
 
 let _saveIndicatorTimer = null;
@@ -2190,6 +2222,17 @@ function _recSetupScroll(tbody) {
   );
 }
 
+const _rlTagFilters = new Set();
+function toggleRlTagFilter(tag) {
+  if (_rlTagFilters.has(tag)) _rlTagFilters.delete(tag);
+  else _rlTagFilters.add(tag);
+  renderRecipeList();
+}
+function clearRlTagFilters() {
+  _rlTagFilters.clear();
+  renderRecipeList();
+}
+
 function renderRecipeList() {
   invalidateMaps();
   invalidateCostCache();
@@ -2292,6 +2335,37 @@ function renderRecipeList() {
     recipes = recipes.filter((r) => r.status === "review");
   if (gpFilter === "status-approved")
     recipes = recipes.filter((r) => r.status === "approved");
+  // Tag filter chips
+  if (_rlTagFilters.size > 0)
+    recipes = recipes.filter((r) =>
+      [..._rlTagFilters].every((t) => (r.tags || []).includes(t)),
+    );
+  // Populate tag bar
+  const tagBar = document.getElementById("rl-tag-bar");
+  if (tagBar) {
+    const allTags = new Map();
+    state.recipes.filter((r) => !r.yieldQty).forEach((r) =>
+      (r.tags || []).forEach((t) => allTags.set(t, (allTags.get(t) || 0) + 1)),
+    );
+    if (allTags.size > 0) {
+      tagBar.style.display = "flex";
+      const sorted = [...allTags.entries()].sort((a, b) => b[1] - a[1]);
+      tagBar.innerHTML =
+        '<span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">Tags:</span>' +
+        sorted.map(([tag, cnt]) => {
+          const active = _rlTagFilters.has(tag);
+          return `<button onclick="toggleRlTagFilter('${tag.replace(/'/g, "\\'")}')"
+            style="font-size:11px;padding:2px 8px;border-radius:12px;border:1px solid ${active ? "var(--accent)" : "var(--border)"};
+            background:${active ? "var(--accent-bg)" : "transparent"};color:${active ? "var(--accent)" : "var(--text-secondary)"};
+            cursor:pointer;font-weight:${active ? "700" : "500"};white-space:nowrap">#${escHtml(tag)} <span style="color:var(--text-muted);font-size:10px">${cnt}</span></button>`;
+        }).join("") +
+        (_rlTagFilters.size > 0
+          ? '<button onclick="clearRlTagFilters()" style="font-size:10px;padding:2px 8px;border:none;background:none;color:var(--red);cursor:pointer;font-weight:600">✕ Clear</button>'
+          : "");
+    } else {
+      tagBar.style.display = "none";
+    }
+  }
   // Sort
   recipes = [...recipes].sort((a, b) => {
     if (sortVal === "name") return a.name.localeCompare(b.name);
@@ -5326,6 +5400,7 @@ function saveIngQuickEdit(ingId) {
   const newCost = parseFloat(pop.querySelector(`#iqe-cost-${ingId}`)?.value);
   const newYld = parseFloat(pop.querySelector(`#iqe-yield-${ingId}`)?.value);
   if (!isNaN(newSize) && newSize > 0) ing.packSize = newSize;
+  const oldCostQE = ing.packCost;
   if (!isNaN(newCost) && newCost >= 0) {
     if (ing.packCost !== newCost) {
       if (!ing.priceHistory) ing.priceHistory = [];
@@ -5342,6 +5417,7 @@ function saveIngQuickEdit(ingId) {
   refreshCostPanel();
   renderIngredientLibrary && renderIngredientLibrary();
   showToast("✓ " + ing.name + " updated", "success", 1500);
+  if (oldCostQE !== ing.packCost) checkPriceImpact(ing, oldCostQE, ing.packCost);
 }
 
 // ─── AI Recipe Import ─────────────────────────────────────────────────────────
@@ -5985,6 +6061,7 @@ function saveIngPriceEdit(ingId) {
   const pop = document.querySelector(".ing-price-pop");
   const ing = state.ingredients.find((i) => i.id === ingId);
   if (!pop || !ing) return;
+  const oldCostPE = ing.packCost;
   const newCost = parseFloat(pop.querySelector("#ing-price-pop-input").value);
   if (!isNaN(newCost) && newCost >= 0) {
     if (ing.packCost !== newCost) {
@@ -6000,6 +6077,7 @@ function saveIngPriceEdit(ingId) {
   pop.remove();
   save();
   renderIngredientLibrary();
+  if (oldCostPE !== ing.packCost) checkPriceImpact(ing, oldCostPE, ing.packCost);
 }
 
 // ─── Ingredient Library ────────────────────────────────────────
@@ -6223,6 +6301,222 @@ function switchPrimarySupplier(ingId, rowIdx) {
     "success",
     2000,
   );
+  // Refresh global savings panel if it's open behind this modal
+  _refreshGlobalSavingsPanel();
+}
+
+// ─── Global Supplier Savings Panel ───────────────────────────────────────────
+function openSupplierSavingsPanel() {
+  const cur = state.currency || "£";
+  const rows = [];
+  state.ingredients.forEach((ing) => {
+    if (!(ing.altSuppliers || []).length || !ing.packCost || !ing.packSize) return;
+    const yld = (ing.yieldPct || 100) / 100;
+    const primaryCpu = ing.packCost / ing.packSize / yld;
+    const primarySup = state.suppliers.find((s) => s.id === ing.supplierId);
+    let cheapest = null;
+    for (const alt of ing.altSuppliers) {
+      if (!alt.packCost || !alt.packSize) continue;
+      const altCpu = alt.packCost / alt.packSize / yld;
+      if (!cheapest || altCpu < cheapest.cpu) {
+        cheapest = { ...alt, cpu: altCpu, supName: state.suppliers.find((s) => s.id === alt.supplierId)?.name || "Unknown" };
+      }
+    }
+    if (!cheapest) return;
+    const saving = primaryCpu - cheapest.cpu;
+    const pct = primaryCpu > 0 ? (saving / primaryCpu) * 100 : 0;
+    rows.push({
+      ing, primaryCpu, primaryName: primarySup?.name || "No supplier",
+      cheapestCpu: cheapest.cpu, cheapestName: cheapest.supName,
+      cheapestAlt: cheapest, saving, pct,
+    });
+  });
+  rows.sort((a, b) => b.pct - a.pct); // biggest % saving first
+
+  const cheaper = rows.filter((r) => r.pct >= 3);
+  const totalSaving = cheaper.reduce((s, r) => s + r.saving, 0);
+  const modal = document.getElementById("sup-savings-modal");
+  if (!modal) {
+    // Create modal dynamically
+    const div = document.createElement("div");
+    div.id = "sup-savings-modal";
+    div.className = "modal-overlay hidden";
+    div.innerHTML = `<div class="modal" style="width:900px;max-height:90vh;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <div><h2>🏷 Supplier Price Compare</h2>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Ingredients where an alternative supplier is cheaper — switch to save money</div></div>
+        <button class="modal-close" onclick="document.getElementById('sup-savings-modal').classList.add('hidden')">✕</button>
+      </div>
+      <div id="sup-savings-body" class="modal-body" style="flex:1;overflow-y:auto;padding:0"></div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="document.getElementById('sup-savings-modal').classList.add('hidden')">Close</button>
+        <button class="btn-primary" id="sup-savings-switch-btn" onclick="applySupplierSavings()">🔄 Switch all checked to cheapest</button>
+      </div>
+    </div>`;
+    document.body.appendChild(div);
+  }
+  _renderSupplierSavings(rows, cheaper, totalSaving);
+  document.getElementById("sup-savings-modal").classList.remove("hidden");
+}
+
+function _renderSupplierSavings(rows, cheaper, totalSaving) {
+  const cur = state.currency || "£";
+  const body = document.getElementById("sup-savings-body");
+  if (!body) return;
+  let html = "";
+  if (cheaper.length > 0) {
+    html += `<div style="padding:12px 20px;background:var(--green-bg);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
+      <span style="font-size:18px">💰</span>
+      <div style="flex:1"><span style="font-size:13px;font-weight:700;color:var(--green)">${cheaper.length} ingredient${cheaper.length !== 1 ? "s" : ""}</span>
+      <span style="font-size:12px;color:var(--text-secondary)"> could be cheaper — potential saving: </span>
+      <span style="font-size:13px;font-weight:700;color:var(--green)">${cur}${totalSaving.toFixed(4)}/unit avg</span></div>
+      <button class="btn-secondary btn-sm" onclick="document.querySelectorAll('.sup-sav-check').forEach(c=>c.checked=true)">Select all</button>
+      <button class="btn-secondary btn-sm" onclick="document.querySelectorAll('.sup-sav-check').forEach(c=>c.checked=false)">Deselect</button>
+    </div>`;
+  }
+  if (!rows.length) {
+    html += `<div style="padding:40px;text-align:center;color:var(--text-muted)">
+      <div style="font-size:24px;margin-bottom:8px">✓</div>
+      <div style="font-size:13px">No ingredients have alternative suppliers yet.<br>Add alternative suppliers when editing ingredients.</div>
+    </div>`;
+  } else {
+    html += `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--bg-sidebar)">
+        <th style="padding:8px 10px;text-align:left;width:30px"></th>
+        <th style="padding:8px 10px;text-align:left">Ingredient</th>
+        <th style="padding:8px 10px;text-align:left">Current Supplier</th>
+        <th style="padding:8px 10px;text-align:right">Current /${cur}</th>
+        <th style="padding:8px 10px;text-align:left">Cheapest Alt</th>
+        <th style="padding:8px 10px;text-align:right">Alt /${cur}</th>
+        <th style="padding:8px 10px;text-align:right">Saving</th>
+      </tr></thead><tbody>`;
+    rows.forEach((r) => {
+      const isCheaper = r.pct >= 3;
+      const isDearer = r.pct <= -3;
+      const savCol = isCheaper ? "var(--green)" : isDearer ? "var(--red)" : "var(--text-muted)";
+      html += `<tr style="${isCheaper ? "background:rgba(76,175,125,0.04)" : ""};cursor:pointer" title="Click to compare all suppliers for ${escHtml(r.ing.name)}" onclick="openSupplierCompare('${r.ing.id}')">
+        <td style="padding:6px 10px" onclick="event.stopPropagation()">${isCheaper ? `<input type="checkbox" class="sup-sav-check" data-ing-id="${r.ing.id}" checked style="accent-color:var(--accent);cursor:pointer;width:16px;height:16px">` : ""}</td>
+        <td style="padding:6px 10px;font-weight:600"><span style="color:var(--accent);text-decoration:underline;text-decoration-style:dotted">${escHtml(r.ing.name)}</span><div style="font-size:10px;color:var(--text-muted)">${escHtml(r.ing.category || "Other")} · ${r.ing.packSize}${r.ing.unit}</div></td>
+        <td style="padding:6px 10px;color:var(--text-secondary)">${escHtml(r.primaryName)}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:600">${cur}${r.primaryCpu.toFixed(4)}</td>
+        <td style="padding:6px 10px;color:var(--text-secondary)">${escHtml(r.cheapestName)}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:700;color:${isCheaper ? "var(--green)" : "var(--text-primary)"}">${cur}${r.cheapestCpu.toFixed(4)}</td>
+        <td style="padding:6px 10px;text-align:right" onclick="event.stopPropagation()">
+          <span style="font-weight:700;color:${savCol}">${isCheaper ? "↓" : isDearer ? "↑" : "—"} ${Math.abs(r.pct).toFixed(1)}%</span>
+          ${isCheaper ? `<div style="font-size:10px;color:var(--green)">Save ${cur}${r.saving.toFixed(4)}/${r.ing.unit}</div>` : ""}
+          ${isCheaper ? `<button class="btn-secondary btn-sm" style="font-size:10px;margin-top:4px;padding:2px 8px" onclick="_switchSingleSupplier('${r.ing.id}')">⚡ Switch</button>` : ""}
+        </td>
+      </tr>`;
+    });
+    html += "</tbody></table>";
+  }
+  body.innerHTML = html;
+}
+
+function applySupplierSavings() {
+  const checks = document.querySelectorAll(".sup-sav-check:checked");
+  let switched = 0;
+  checks.forEach((cb) => {
+    const ingId = cb.dataset.ingId;
+    const ing = state.ingredients.find((i) => i.id === ingId);
+    if (!ing || !(ing.altSuppliers || []).length) return;
+    const yld = (ing.yieldPct || 100) / 100;
+    // Find cheapest alt
+    let best = null, bestIdx = -1;
+    (ing.altSuppliers || []).forEach((alt, idx) => {
+      if (!alt.packCost || !alt.packSize) return;
+      const cpu = alt.packCost / alt.packSize / yld;
+      if (!best || cpu < best.cpu) { best = { ...alt, cpu }; bestIdx = idx; }
+    });
+    if (!best || bestIdx < 0) return;
+    const primaryCpu = ing.packCost / ing.packSize / yld;
+    if (best.cpu >= primaryCpu * 0.97) return; // not actually cheaper
+    // Demote current primary to alt
+    const oldPrimary = {
+      supplierId: ing.supplierId, packSize: ing.packSize,
+      packCost: ing.packCost, note: "",
+    };
+    // Promote cheapest alt
+    const chosen = ing.altSuppliers[bestIdx];
+    ing.supplierId = chosen.supplierId;
+    ing.packCost = chosen.packCost;
+    ing.packSize = chosen.packSize;
+    // Replace the alt with old primary
+    ing.altSuppliers.splice(bestIdx, 1, oldPrimary);
+    switched++;
+  });
+  if (!switched) { showToast("No items selected", "error", 2000); return; }
+  save();
+  renderIngredientLibrary();
+  if (state.activeRecipeId) renderRecipeEditor();
+  document.getElementById("sup-savings-modal").classList.add("hidden");
+  showToast(`✓ Switched ${switched} ingredient${switched !== 1 ? "s" : ""} to cheaper supplier`, "success", 2500);
+}
+
+function _switchSingleSupplier(ingId) {
+  const ing = state.ingredients.find((i) => i.id === ingId);
+  if (!ing || !(ing.altSuppliers || []).length) return;
+  const yld = (ing.yieldPct || 100) / 100;
+  let best = null, bestIdx = -1;
+  (ing.altSuppliers || []).forEach((alt, idx) => {
+    if (!alt.packCost || !alt.packSize) return;
+    const cpu = alt.packCost / alt.packSize / yld;
+    if (!best || cpu < best.cpu) { best = { ...alt, cpu }; bestIdx = idx; }
+  });
+  if (!best || bestIdx < 0) return;
+  const primaryCpu = ing.packSize > 0 ? ing.packCost / ing.packSize / yld : Infinity;
+  if (best.cpu >= primaryCpu * 0.97) { showToast("Alt supplier is not cheaper", "error", 2000); return; }
+  // Demote current primary to alt
+  const oldPrimary = {
+    supplierId: ing.supplierId, packSize: ing.packSize,
+    packCost: ing.packCost, note: "",
+  };
+  const chosen = ing.altSuppliers[bestIdx];
+  ing.supplierId = chosen.supplierId;
+  ing.packCost = chosen.packCost;
+  ing.packSize = chosen.packSize;
+  ing.altSuppliers.splice(bestIdx, 1, oldPrimary);
+  save();
+  renderIngredientLibrary();
+  if (state.activeRecipeId) renderRecipeEditor();
+  const newSupName = (state.suppliers || []).find(s => s.id === ing.supplierId)?.name || "new supplier";
+  showToast("✓ " + escHtml(ing.name) + " switched to " + escHtml(newSupName), "success", 2500);
+  // Re-render the savings panel
+  openSupplierSavingsPanel();
+}
+
+function _refreshGlobalSavingsPanel() {
+  const modal = document.getElementById("sup-savings-modal");
+  if (!modal || modal.classList.contains("hidden")) return;
+  // Re-run the same logic as openSupplierSavingsPanel but just refresh the body
+  const cur = state.currency || "£";
+  const rows = [];
+  state.ingredients.forEach((ing) => {
+    if (!(ing.altSuppliers || []).length || !ing.packCost || !ing.packSize) return;
+    const yld = (ing.yieldPct || 100) / 100;
+    const primaryCpu = ing.packCost / ing.packSize / yld;
+    const primarySup = state.suppliers.find((s) => s.id === ing.supplierId);
+    let cheapest = null;
+    for (const alt of ing.altSuppliers) {
+      if (!alt.packCost || !alt.packSize) continue;
+      const altCpu = alt.packCost / alt.packSize / yld;
+      if (!cheapest || altCpu < cheapest.cpu) {
+        cheapest = { ...alt, cpu: altCpu, supName: state.suppliers.find((s) => s.id === alt.supplierId)?.name || "Unknown" };
+      }
+    }
+    if (!cheapest) return;
+    const saving = primaryCpu - cheapest.cpu;
+    const pct = primaryCpu > 0 ? (saving / primaryCpu) * 100 : 0;
+    rows.push({
+      ing, primaryCpu, primaryName: primarySup?.name || "No supplier",
+      cheapestCpu: cheapest.cpu, cheapestName: cheapest.supName,
+      cheapestAlt: cheapest, saving, pct,
+    });
+  });
+  rows.sort((a, b) => b.pct - a.pct);
+  const cheaper = rows.filter((r) => r.pct >= 3);
+  const totalSaving = cheaper.reduce((s, r) => s + r.saving, 0);
+  _renderSupplierSavings(rows, cheaper, totalSaving);
 }
 
 function renderIngCatSidebar() {
@@ -7353,6 +7647,176 @@ function renderDashboard() {
       </div>
     </div>
 
+    <!-- GP Health / Margin Mix -->
+    ${(() => {
+      const gpTarget = state.activeGP || 70;
+      const highGP = rows.filter(x => x.gp >= gpTarget);
+      const midGP = rows.filter(x => x.gp >= gpTarget - 10 && x.gp < gpTarget);
+      const lowGP = rows.filter(x => x.gp < gpTarget - 10);
+      const totalR = rows.length;
+      const pctH = ((highGP.length / totalR) * 100).toFixed(0);
+      const pctM = ((midGP.length / totalR) * 100).toFixed(0);
+      const pctL = ((lowGP.length / totalR) * 100).toFixed(0);
+
+      return `<div class="dash-grid" style="margin-bottom:20px">
+        <div class="dash-card">
+          <h3 class="dash-card-title">🎯 Margin Health — Target ${gpTarget}%</h3>
+          <div style="display:flex;gap:4px;height:22px;border-radius:6px;overflow:hidden;margin-bottom:14px">
+            ${highGP.length ? `<div style="flex:${highGP.length};background:var(--green);position:relative;min-width:20px" title="${highGP.length} recipes above target">
+              <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff">${pctH}%</span>
+            </div>` : ''}
+            ${midGP.length ? `<div style="flex:${midGP.length};background:var(--accent);position:relative;min-width:20px" title="${midGP.length} recipes within 10% of target">
+              <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff">${pctM}%</span>
+            </div>` : ''}
+            ${lowGP.length ? `<div style="flex:${lowGP.length};background:var(--red);position:relative;min-width:20px" title="${lowGP.length} recipes below target">
+              <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff">${pctL}%</span>
+            </div>` : ''}
+          </div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px">
+            <div style="display:flex;align-items:center;gap:6px"><div style="width:10px;height:10px;border-radius:50%;background:var(--green)"></div><span style="font-size:11px;color:var(--text-secondary)">Above target: <b>${highGP.length}</b></span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="width:10px;height:10px;border-radius:50%;background:var(--accent)"></div><span style="font-size:11px;color:var(--text-secondary)">Near target: <b>${midGP.length}</b></span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="width:10px;height:10px;border-radius:50%;background:var(--red)"></div><span style="font-size:11px;color:var(--text-secondary)">Below target: <b>${lowGP.length}</b></span></div>
+          </div>
+          ${lowGP.length ? `<div style="margin-top:6px;padding-top:10px;border-top:1px solid var(--border)">
+            <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:6px">⚠ Recipes below ${gpTarget - 10}% GP:</div>
+            <div style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto">
+              ${lowGP.sort((a,b) => a.gp - b.gp).map(x => `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--bg-card2);border-radius:var(--radius-sm);cursor:pointer" onclick="selectRecipe('${x.r.id}');showView('recipes')">
+                <span style="font-size:12px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(x.r.name)}</span>
+                <span style="font-size:12px;font-weight:700;color:var(--red)">${x.gp.toFixed(1)}%</span>
+                <span style="font-size:11px;color:var(--text-muted)">${fmt(x.cost)} cost</span>
+              </div>`).join('')}
+            </div>
+          </div>` : `<div style="margin-top:6px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--green);font-weight:600">✓ All recipes are within target range</div>`}
+        </div>
+
+        <!-- Spending by Supplier -->
+        <div class="dash-card">
+          <h3 class="dash-card-title">🏪 Spend by Supplier</h3>
+          ${(() => {
+            const supSpend = {};
+            rows.forEach(({r}) => {
+              (r.ingredients || []).forEach(ri => {
+                const ing = getIngMap().get(ri.ingId);
+                if (!ing) return;
+                const sup = (state.suppliers || []).find(s => s.id === ing.supplierId);
+                const supName = sup ? sup.name : 'Unassigned';
+                const lineCost = ingLineCost(ri.ingId, ri.qty, ri.recipeUnit);
+                supSpend[supName] = (supSpend[supName] || 0) + lineCost;
+              });
+            });
+            const sorted = Object.entries(supSpend).sort((a,b) => b[1] - a[1]);
+            const totalSpend = sorted.reduce((s, [,v]) => s + v, 0);
+            if (!sorted.length) return '<div style="font-size:12px;color:var(--text-muted)">No supplier data</div>';
+            const colors = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+            // SVG donut
+            let cumPct = 0;
+            const donutParts = sorted.map(([name, spend], idx) => {
+              const pct = totalSpend > 0 ? spend / totalSpend : 0;
+              const startAngle = cumPct * 2 * Math.PI - Math.PI / 2;
+              cumPct += pct;
+              const endAngle = cumPct * 2 * Math.PI - Math.PI / 2;
+              const large = pct > 0.5 ? 1 : 0;
+              const r = 50;
+              const x1 = 60 + r * Math.cos(startAngle);
+              const y1 = 60 + r * Math.sin(startAngle);
+              const x2 = 60 + r * Math.cos(endAngle);
+              const y2 = 60 + r * Math.sin(endAngle);
+              const col = colors[idx % colors.length];
+              if (pct >= 0.999) return `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${col}" stroke-width="20"/>`;
+              if (pct < 0.005) return '';
+              return `<path d="M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2}" fill="none" stroke="${col}" stroke-width="20"/>`;
+            });
+            return `<div style="display:flex;gap:16px;align-items:flex-start">
+              <svg viewBox="0 0 120 120" width="110" height="110" style="flex-shrink:0">
+                ${donutParts.join('')}
+                <text x="60" y="56" text-anchor="middle" font-size="11" font-weight="800" fill="var(--text-primary)">${fmt(totalSpend)}</text>
+                <text x="60" y="70" text-anchor="middle" font-size="7" fill="var(--text-muted)">total / portion</text>
+              </svg>
+              <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0;max-height:180px;overflow-y:auto">
+                ${sorted.map(([name, spend], idx) => {
+                  const pct = totalSpend > 0 ? ((spend / totalSpend) * 100).toFixed(1) : '0.0';
+                  const col = colors[idx % colors.length];
+                  return `<div style="display:flex;align-items:center;gap:6px">
+                    <div style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0"></div>
+                    <span style="font-size:11px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)">${escHtml(name)}</span>
+                    <span style="font-size:11px;font-weight:700;color:var(--text-primary);flex-shrink:0">${fmt(spend)}</span>
+                    <span style="font-size:10px;color:var(--text-muted);flex-shrink:0;width:36px;text-align:right">${pct}%</span>
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>`;
+          })()}
+        </div>
+      </div>`;
+    })()}
+
+    <!-- Cost Trend — Top 10 most-used ingredients -->
+    ${(() => {
+      // Find top ingredients by usage across filtered recipes
+      const ingUsage = {};
+      rows.forEach(({r}) => {
+        (r.ingredients || []).forEach(ri => {
+          if (ri.ingId) ingUsage[ri.ingId] = (ingUsage[ri.ingId] || 0) + 1;
+        });
+      });
+      const topIngIds = Object.entries(ingUsage)
+        .sort((a,b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([id]) => id);
+      const ingWithHist = topIngIds
+        .map(id => state.ingredients.find(i => i.id === id))
+        .filter(Boolean)
+        .filter(i => (i.priceHistory || []).length >= 2);
+      if (!ingWithHist.length) return '';
+
+      const sparkColors = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#84cc16','#06b6d4'];
+
+      const cards = ingWithHist.map(function(ing, idx) {
+        const hist = (ing.priceHistory || []).slice(-12);
+        const points = hist
+          .filter(function(h) { return h.newCost !== undefined; })
+          .map(function(h) { return { date: new Date(h.date), cost: h.newCost }; });
+        points.push({ date: new Date(), cost: ing.packCost });
+        if (points.length < 2) return '';
+        const costs = points.map(function(p) { return p.cost; });
+        const minC = Math.min.apply(null, costs);
+        const maxC = Math.max.apply(null, costs);
+        const range = maxC - minC || 1;
+        const svgW = 220, svgH = 40;
+        const step = svgW / (points.length - 1);
+        const polyPoints = points.map(function(p, pi) {
+          var px = pi * step;
+          var py = svgH - ((p.cost - minC) / range) * (svgH - 4) - 2;
+          return px.toFixed(1) + ',' + py.toFixed(1);
+        }).join(' ');
+        const firstCost = points[0].cost;
+        const lastCost = points[points.length - 1].cost;
+        const change = firstCost > 0 ? ((lastCost - firstCost) / firstCost * 100) : 0;
+        const changeCol = change > 2 ? 'var(--red)' : change < -2 ? 'var(--green)' : 'var(--text-muted)';
+        const lineCol = sparkColors[idx % sparkColors.length];
+        const lastX = ((points.length - 1) * step).toFixed(1);
+        const lastY = (svgH - ((lastCost - minC) / range) * (svgH - 4) - 2).toFixed(1);
+        return '<div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+          + '<span style="font-size:12px;font-weight:600;color:var(--text-primary);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(ing.name) + '">' + escHtml(ing.name) + '</span>'
+          + '<span style="font-size:11px;font-weight:700;color:' + changeCol + '">' + (change > 0 ? '+' : '') + change.toFixed(1) + '%</span>'
+          + '</div>'
+          + '<svg viewBox="0 0 ' + svgW + ' ' + svgH + '" width="100%" height="' + svgH + '" preserveAspectRatio="none" style="display:block">'
+          + '<polyline points="' + polyPoints + '" fill="none" stroke="' + lineCol + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+          + '<circle cx="' + lastX + '" cy="' + lastY + '" r="3" fill="' + lineCol + '"/>'
+          + '</svg>'
+          + '<div style="display:flex;justify-content:space-between;margin-top:4px">'
+          + '<span style="font-size:10px;color:var(--text-muted)">' + fmt(firstCost) + '</span>'
+          + '<span style="font-size:10px;color:var(--text-muted)">&rarr; ' + fmt(lastCost) + '</span>'
+          + '</div></div>';
+      }).join('');
+
+      return '<div class="dash-card" style="margin-bottom:20px">'
+        + '<h3 class="dash-card-title">📈 Cost Trends — Top Ingredients</h3>'
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">'
+        + cards + '</div></div>';
+    })()}
+
     <!-- GP% by Category Chart -->
     ${(() => {
       const cats = [
@@ -7397,6 +7861,41 @@ function renderDashboard() {
         </div>
       </div>`;
     })()}
+
+    <!-- Revenue Potential Summary -->
+    <div class="dash-card" style="margin-bottom:20px">
+      <h3 class="dash-card-title">💵 Revenue Potential per Cover</h3>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+        ${(() => {
+          const totalCostAll = rows.reduce((s,x) => s + x.cost, 0);
+          const totalPriceAll = rows.reduce((s,x) => s + x.price, 0);
+          const totalProfitAll = rows.reduce((s,x) => s + x.profit, 0);
+          const avgCost = totalCostAll / rows.length;
+          const avgPrice = totalPriceAll / rows.length;
+          const avgProfitAll = totalProfitAll / rows.length;
+          const medianProfit = [...rows].sort((a,b) => a.profit - b.profit)[Math.floor(rows.length / 2)].profit;
+          return `
+            <div style="text-align:center;padding:8px 16px;background:var(--bg-card2);border-radius:var(--radius-sm);flex:1;min-width:100px">
+              <div style="font-size:20px;font-weight:800;color:var(--text-primary)">${fmt(avgCost)}</div>
+              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Avg food cost</div>
+            </div>
+            <div style="font-size:20px;color:var(--text-muted)">→</div>
+            <div style="text-align:center;padding:8px 16px;background:var(--bg-card2);border-radius:var(--radius-sm);flex:1;min-width:100px">
+              <div style="font-size:20px;font-weight:800;color:var(--accent)">${fmt(avgPrice)}</div>
+              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Avg sell price</div>
+            </div>
+            <div style="font-size:20px;color:var(--text-muted)">=</div>
+            <div style="text-align:center;padding:8px 16px;background:var(--bg-card2);border-radius:var(--radius-sm);flex:1;min-width:100px">
+              <div style="font-size:20px;font-weight:800;color:var(--green)">${fmt(avgProfitAll)}</div>
+              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Avg profit / portion</div>
+            </div>
+            <div style="text-align:center;padding:8px 16px;background:var(--bg-card2);border-radius:var(--radius-sm);flex:1;min-width:100px">
+              <div style="font-size:20px;font-weight:800;color:var(--accent)">${fmt(medianProfit)}</div>
+              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Median profit</div>
+            </div>`;
+        })()}
+      </div>
+    </div>
 
     <div class="dash-grid">
       <!-- Profitability Ranking -->
@@ -7611,7 +8110,154 @@ function renderDashboard() {
   `;
 }
 
-// ─── Menu PDF Export ───────────────────────────────────────────
+// ─── Dashboard PDF Export ──────────────────────────────────────
+function exportDashboardPDF() {
+  const sellableRecipes = state.recipes.filter(r => !r.yieldQty);
+  if (!sellableRecipes.length) { toast('No recipes to export'); return; }
+
+  const rows = sellableRecipes.map(r => {
+    const cost = recipeTotalCost(r) / (r.portions || 1);
+    const isOverride = !!(r.priceOverride && r.priceOverride > 0);
+    const price = isOverride ? r.priceOverride : suggestPrice(cost, state.activeGP);
+    const gp = price > 0 ? ((price - cost) / price) * 100 : 0;
+    const profit = price - cost;
+    return { name: r.name, category: r.category || '—', cost, price, gp, profit };
+  }).sort((a, b) => b.profit - a.profit);
+
+  const avgGP = rows.reduce((s, x) => s + x.gp, 0) / rows.length;
+  const avgProfit = rows.reduce((s, x) => s + x.profit, 0) / rows.length;
+  const totalProfit = rows.reduce((s, x) => s + x.profit, 0);
+  const gpTarget = state.activeGP || 70;
+  const belowTarget = rows.filter(x => x.gp < gpTarget - 10).length;
+
+  // Build printable HTML
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Dashboard Report</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;margin:40px;color:#1a1a2e;font-size:12px}
+    h1{font-size:22px;margin-bottom:4px} .sub{color:#666;font-size:12px;margin-bottom:20px}
+    .kpi-row{display:flex;gap:12px;margin-bottom:20px}
+    .kpi{border:1px solid #ddd;border-radius:8px;padding:12px 16px;flex:1;text-align:center}
+    .kpi-v{font-size:22px;font-weight:800} .kpi-l{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th{text-align:left;padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #ccc;color:#666}
+    td{padding:6px 8px;border-bottom:1px solid #eee} tr:nth-child(even) td{background:#f9f9fb}
+    .green{color:#059669} .red{color:#dc2626} .accent{color:#6366f1}
+    @media print{body{margin:20px}}
+  </style></head><body>
+  <h1>Cost Dashboard Report</h1>
+  <div class="sub">${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})} &mdash; ${rows.length} recipes</div>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-v">${rows.length}</div><div class="kpi-l">Total Recipes</div></div>
+    <div class="kpi"><div class="kpi-v accent">${avgGP.toFixed(1)}%</div><div class="kpi-l">Avg GP%</div></div>
+    <div class="kpi"><div class="kpi-v green">${fmt(avgProfit)}</div><div class="kpi-l">Avg Profit / Portion</div></div>
+    <div class="kpi"><div class="kpi-v">${fmt(totalProfit)}</div><div class="kpi-l">Total Profit (all portions)</div></div>
+    <div class="kpi"><div class="kpi-v ${belowTarget ? 'red' : 'green'}">${belowTarget}</div><div class="kpi-l">Below Target GP</div></div>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>Recipe</th><th>Category</th><th>Cost/Portion</th><th>Sell Price</th><th>GP%</th><th>Profit/Portion</th></tr></thead>
+    <tbody>${rows.map((x,i) => {
+      const gpCls = x.gp >= 75 ? 'green' : x.gp >= 65 ? 'accent' : 'red';
+      return `<tr><td>${i+1}</td><td><b>${escHtml(x.name)}</b></td><td>${escHtml(x.category)}</td><td>${fmt(x.cost)}</td><td class="accent"><b>${fmt(x.price)}</b></td><td class="${gpCls}"><b>${x.gp.toFixed(1)}%</b></td><td class="${x.profit>=0?'green':'red'}"><b>${fmt(x.profit)}</b></td></tr>`;
+    }).join('')}</tbody>
+  </table>
+  <script>window.onload=function(){window.print()}<\/script>
+  </body></html>`;
+
+  browserIPC.exportPDF(html);
+}
+
+// ─── Batch PDF Report (all recipes in one document) ──────────
+function exportBatchPDF() {
+  const sellable = state.recipes.filter(r => !r.yieldQty);
+  if (!sellable.length) { showToast('No recipes to export', 'error'); return; }
+  const cur = state.currency || '£';
+  const gp = state.activeGP || 70;
+  const vatRate = state.vatRate || 0;
+  const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  const pages = sellable.map(recipe => {
+    const totalCost = recipeTotalCost(recipe);
+    const portions = recipe.portions || 1;
+    const cpp = totalCost / portions;
+    const isOverride = !!(recipe.priceOverride && recipe.priceOverride > 0);
+    const price = isOverride ? recipe.priceOverride : suggestPrice(cpp, gp);
+    const profit = price - cpp;
+    const gpPct = price > 0 ? ((price - cpp) / price) * 100 : 0;
+    const allergens = recipeAllergens(recipe);
+
+    const ingRows = (recipe.ingredients || []).map(ri => {
+      const ing = state.ingredients.find(i => i.id === ri.ingId);
+      if (!ing) return '';
+      const cost = ingLineCost(ri.ingId, ri.qty, ri.recipeUnit);
+      const pct = totalCost > 0 ? ((cost / totalCost) * 100).toFixed(0) : 0;
+      return '<tr><td>' + escHtml(ing.name) + '</td><td style="text-align:right">' + ri.qty + ' ' + (ri.recipeUnit || ing.unit) + '</td><td style="text-align:right">' + cur + cost.toFixed(2) + '</td><td style="text-align:right;color:#888">' + pct + '%</td></tr>';
+    }).join('');
+
+    // Sub-recipe rows
+    const subRows = (recipe.subRecipes || []).map(function(sr) {
+      const subR = state.recipes.find(function(r) { return r.id === sr.recipeId; });
+      if (!subR) return '';
+      const unitLabel = recipeUnitLabel(subR);
+      const subCost = recipeCostPerUnit(subR) * (sr.qty || 1);
+      const pct = totalCost > 0 ? ((subCost / totalCost) * 100).toFixed(0) : 0;
+      // Build a short list of what's inside the sub-recipe
+      var subIngNames = (subR.ingredients || []).slice(0, 4).map(function(ri2) {
+        var ing2 = state.ingredients.find(function(i) { return i.id === ri2.ingId; });
+        return ing2 ? ing2.name : '';
+      }).filter(Boolean).join(', ');
+      if ((subR.ingredients || []).length > 4) subIngNames += ' +' + ((subR.ingredients || []).length - 4) + ' more';
+      var nestedSubs = (subR.subRecipes || []).length;
+      if (nestedSubs) subIngNames += (subIngNames ? ' · ' : '') + nestedSubs + ' sub-recipe' + (nestedSubs > 1 ? 's' : '');
+
+      return '<tr style="background:#f7f7fa">'
+        + '<td><span style="color:#e87c2e;font-weight:700;font-size:10px;margin-right:4px">SUB</span>' + escHtml(subR.name)
+        + (subIngNames ? '<div style="font-size:10px;color:#999;margin-top:1px">' + escHtml(subIngNames) + '</div>' : '')
+        + '</td>'
+        + '<td style="text-align:right">' + (sr.qty || 1) + ' ' + unitLabel + '</td>'
+        + '<td style="text-align:right">' + cur + subCost.toFixed(2) + '</td>'
+        + '<td style="text-align:right;color:#888">' + pct + '%</td></tr>';
+    }).join('');
+
+    return '<div class="page-break">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1a1a2e;padding-bottom:8px;margin-bottom:14px">'
+      + '<div><div style="font-size:9px;letter-spacing:2px;text-transform:uppercase;color:#e87c2e;font-weight:700">Recipe Cost Sheet</div>'
+      + '<h2 style="font-size:20px;font-weight:900;margin:2px 0 0">' + escHtml(recipe.name) + '</h2>'
+      + '<div style="font-size:11px;color:#666">' + escHtml(recipe.category || '—') + ' · ' + portions + ' portion' + (portions !== 1 ? 's' : '') + '</div></div>'
+      + '<div style="text-align:right;font-size:11px;color:#888"><div>GP Target: <b>' + gp + '%</b></div><div>' + date + '</div></div></div>'
+      + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">'
+      + '<div class="kpi"><div class="kpi-l">Food Cost</div><div class="kpi-v">' + cur + cpp.toFixed(2) + '</div></div>'
+      + '<div class="kpi" style="background:#1a1a2e;color:#fff;border-color:#1a1a2e"><div class="kpi-l" style="color:rgba(255,255,255,.6)">Sell Price</div><div class="kpi-v">' + cur + price.toFixed(2) + (isOverride ? ' <span style="font-size:9px;opacity:.7">override</span>' : '') + '</div></div>'
+      + '<div class="kpi" style="background:#e87c2e;color:#fff;border-color:#e87c2e"><div class="kpi-l" style="color:rgba(255,255,255,.6)">Profit</div><div class="kpi-v">' + cur + profit.toFixed(2) + '</div></div>'
+      + '<div class="kpi"><div class="kpi-l">GP%</div><div class="kpi-v" style="color:' + (gpPct >= 70 ? '#059669' : gpPct >= 60 ? '#e87c2e' : '#dc2626') + '">' + gpPct.toFixed(1) + '%</div></div></div>'
+      + '<table><thead><tr><th>Ingredient</th><th style="text-align:right">Qty</th><th style="text-align:right">Cost</th><th style="text-align:right">%</th></tr></thead>'
+      + '<tbody>' + ingRows + subRows + '</tbody>'
+      + '<tfoot><tr><td colspan="2"><b>Total</b></td><td style="text-align:right"><b>' + cur + totalCost.toFixed(2) + '</b></td><td></td></tr></tfoot></table>'
+      + (allergens.length ? '<div style="margin-top:10px;padding:8px 12px;background:#fff7f0;border:1px solid #e87c2e;border-radius:5px;font-size:11px;color:#c85a00"><b>⚠ Allergens:</b> ' + allergens.join(' · ') + '</div>' : '')
+      + '</div>';
+  }).join('');
+
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
+    + '*{box-sizing:border-box;margin:0;padding:0} body{font-family:Arial,Helvetica,sans-serif;color:#1a1a2e;font-size:12px;padding:30px 36px}'
+    + '.page-break{page-break-after:always;margin-bottom:30px;padding-bottom:20px}'
+    + '.page-break:last-child{page-break-after:auto}'
+    + '.kpi{border:1px solid #e0e0e8;border-radius:6px;padding:10px 12px}'
+    + '.kpi-l{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:#888;margin-bottom:4px}'
+    + '.kpi-v{font-size:20px;font-weight:900}'
+    + 'table{width:100%;border-collapse:collapse;margin-top:6px}'
+    + 'th{text-align:left;padding:5px 8px;background:#f7f7fa;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#888;border-bottom:2px solid #e0e0e8}'
+    + 'td{padding:5px 8px;border-bottom:1px solid #f0f0f0;font-size:11px}'
+    + 'tfoot td{background:#f7f7fa;border-top:2px solid #e0e0e8}'
+    + '@media print{.page-break{page-break-after:always}}'
+    + '</style></head><body>'
+    + '<div style="text-align:center;margin-bottom:30px;padding-bottom:16px;border-bottom:3px solid #1a1a2e">'
+    + '<div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#e87c2e;font-weight:700">Full Menu</div>'
+    + '<h1 style="font-size:26px;font-weight:900">Recipe Cost Report</h1>'
+    + '<div style="font-size:12px;color:#888;margin-top:4px">' + sellable.length + ' recipes · ' + date + ' · Target GP ' + gp + '%</div></div>'
+    + pages + '</body></html>';
+
+  browserIPC.exportPDF(html);
+}
+
 // ─── Kitchen View ────────────────────────────────────────────────────────────
 let _kvRecipeId = null;
 let _kvMultiplier = 1;
@@ -7912,6 +8558,7 @@ async function confirmPriceUpdateWizard() {
   }
 
   // Update ingredient price
+  const oldCostPUW = ing.packCost;
   logPriceChange(ing, ing.packCost, newCost);
   ing.packCost = newCost;
   if (!ing.priceHistory) ing.priceHistory = [];
@@ -7942,6 +8589,7 @@ async function confirmPriceUpdateWizard() {
     "success",
     2500,
   );
+  if (oldCostPUW !== newCost) checkPriceImpact(ing, oldCostPUW, newCost);
 }
 
 // ─── Ingredient Substitution ─────────────────────────────────────────────────
@@ -7957,6 +8605,11 @@ function openSubstitutionPanel(ingId) {
       : [ing.unit];
 
   const myCPU = costPerUnit(ing);
+  const recipe = getActiveRecipe();
+  // Calculate per-portion saving context
+  const ri = recipe ? recipe.ingredients.find((x) => x.ingId === ingId) : null;
+  const portions = recipe ? (recipe.portions || 1) : 1;
+
   const subs = state.ingredients
     .filter(
       (x) =>
@@ -7969,17 +8622,32 @@ function openSubstitutionPanel(ingId) {
       const cpu = costPerUnit(x);
       const saving = myCPU > 0 ? ((myCPU - cpu) / myCPU) * 100 : 0;
       const sameCat = x.category === ing.category;
-      return { ing: x, cpu, saving, sameCat };
+      // Per-portion saving (if ingredient used in current recipe)
+      const portionSave = ri ? ((myCPU - cpu) * (ri.qty || 0)) / portions : 0;
+      // Nutrition comparison
+      const nA = ing.nutrition;
+      const nB = x.nutrition;
+      let nutrMatch = null;
+      if (nA && nB) {
+        const diff = Math.abs((nA.kcal || 0) - (nB.kcal || 0));
+        nutrMatch = diff < 30 ? "similar" : (nB.kcal || 0) < (nA.kcal || 0) ? "lighter" : "richer";
+      }
+      return { ing: x, cpu, saving, sameCat, portionSave, nutrMatch, nutrB: nB };
     })
     .filter((x) => x.saving > 0) // only cheaper options
-    .sort((a, b) => b.saving - a.saving)
-    .slice(0, 5);
+    .sort((a, b) => {
+      // Prioritise same category, then by saving
+      if (a.sameCat !== b.sameCat) return a.sameCat ? -1 : 1;
+      return b.saving - a.saving;
+    })
+    .slice(0, 6);
 
   if (!subs.length) {
     showToast("No cheaper alternatives found in library", "success", 2000);
     return;
   }
 
+  const cur = state.currency || "£";
   const panel = document.createElement("div");
   panel.className = "ing-sub-panel";
   panel.style.cssText =
@@ -7991,33 +8659,43 @@ function openSubstitutionPanel(ingId) {
     </div>
     ${subs
       .map(
-        (s) => `
+        (s) => {
+          const catBadge = s.sameCat
+            ? `<span style="font-size:9px;background:var(--blue-bg);color:var(--blue);border:1px solid rgba(91,141,238,.3);padding:1px 5px;border-radius:3px;margin-left:4px">Same category</span>`
+            : "";
+          const nutrInfo = s.nutrMatch
+            ? `<span style="font-size:10px;color:var(--text-muted);margin-left:6px">· ${s.nutrMatch === "similar" ? "≈ similar kcal" : s.nutrMatch === "lighter" ? "↓ fewer kcal" : "↑ more kcal"}</span>`
+            : (s.nutrB ? "" : `<span style="font-size:10px;color:var(--text-muted);margin-left:6px">· no nutrition data</span>`);
+          const portionHtml = s.portionSave > 0.001
+            ? `<div style="font-size:10px;color:var(--green)">Save ${cur}${s.portionSave.toFixed(2)}/portion</div>`
+            : "";
+          return `
       <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <div style="flex:1">
-          <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${escHtml(s.ing.name)}</div>
-          <div style="font-size:11px;color:var(--text-muted)">${escHtml(s.ing.category)} · ${fmt(s.cpu)}/${s.ing.unit}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary)">${escHtml(s.ing.name)}${catBadge}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${escHtml(s.ing.category || "Other")} · ${fmt(s.cpu)}/${s.ing.unit}${nutrInfo}</div>
         </div>
         <div style="text-align:right;flex-shrink:0">
           <div style="font-size:13px;font-weight:800;color:var(--green)">−${s.saving.toFixed(0)}%</div>
-          <div style="font-size:10px;color:var(--text-muted)">cheaper</div>
+          ${portionHtml}
         </div>
         <button onclick="swapIngredientInRecipe('${ingId}','${s.ing.id}');this.closest('.ing-sub-panel').remove()"
           style="padding:5px 10px;font-size:11px;font-weight:600;background:var(--green-bg);border:1px solid var(--green);color:var(--green);border-radius:5px;cursor:pointer;white-space:nowrap">
           Swap In
         </button>
-      </div>`,
+      </div>`;
+        },
       )
       .join("")}
-    <div style="font-size:11px;color:var(--text-muted);margin-top:8px">Only showing ingredients already in your library with compatible units.</div>`;
+    <div style="font-size:11px;color:var(--text-muted);margin-top:8px">Same-category matches shown first. Only ingredients in your library with compatible units.</div>`;
 
   // Find the ingredient row in the recipe table
   const rows = document.querySelectorAll("#recipe-ing-tbody tr");
-  const recipe = getActiveRecipe();
   if (!recipe) {
     showToast("Open a recipe to use substitutions", "error", 2000);
     return;
   }
-  const idx = recipe.ingredients.findIndex((ri) => ri.ingId === ingId);
+  const idx = recipe.ingredients.findIndex((x) => x.ingId === ingId);
   if (idx >= 0 && rows[idx]) {
     rows[idx].style.position = "relative";
     rows[idx].appendChild(panel);
@@ -9394,6 +10072,13 @@ function discardRecipeChanges() {
   }
 }
 
+function _noInputFocused() {
+  const tag = document.activeElement?.tagName;
+  return tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT";
+}
+function _noModalOpen() {
+  return !document.querySelector(".modal-overlay:not(.hidden)");
+}
 function _onGlobalKeydown(e) {
   // Global shortcuts — always active
   if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -9406,31 +10091,56 @@ function _onGlobalKeydown(e) {
     closeSearch();
     return;
   }
-  if (
-    e.key === "?" &&
-    !e.ctrlKey &&
-    !e.metaKey &&
-    document.activeElement?.tagName !== "INPUT" &&
-    document.activeElement?.tagName !== "TEXTAREA"
-  ) {
-    openShortcutsHelp();
+  // Ctrl+Shift+L = toggle light/dark theme
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "L") {
+    e.preventDefault();
+    toggleDarkMode();
     return;
   }
-  // 'N' = new recipe (when no modal/input is focused)
-  if (
-    e.key === "n" &&
-    !e.ctrlKey &&
-    !e.metaKey &&
-    !e.altKey &&
-    document.activeElement?.tagName !== "INPUT" &&
-    document.activeElement?.tagName !== "TEXTAREA" &&
-    document.activeElement?.tagName !== "SELECT"
-  ) {
-    const anyModal = document.querySelector(".modal-overlay:not(.hidden)");
-    if (!anyModal) {
+  // Ctrl+, = open settings
+  if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+    e.preventDefault();
+    showView("settings");
+    return;
+  }
+  // Ctrl+P = print recipe cost sheet (when recipe is open)
+  if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+    e.preventDefault();
+    if (state.activeRecipeId) printRecipe(state.activeRecipeId);
+    return;
+  }
+  // Ctrl+D = duplicate recipe (when recipe is open)
+  if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+    e.preventDefault();
+    if (state.activeRecipeId) duplicateRecipe(state.activeRecipeId);
+    return;
+  }
+  // Ctrl+I = focus ingredient search (when recipe is open)
+  if ((e.ctrlKey || e.metaKey) && e.key === "i") {
+    e.preventDefault();
+    const inp = document.getElementById("ing-search-add");
+    if (inp) { inp.focus(); inp.select(); }
+    return;
+  }
+  // Only fire character shortcuts when not typing in inputs and no modal open
+  if (_noInputFocused() && _noModalOpen()) {
+    // ? = shortcuts help
+    if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
+      openShortcutsHelp();
+      return;
+    }
+    // N = new recipe
+    if (e.key === "n" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       newRecipe();
       showView("recipes");
+      return;
+    }
+    // Navigation: 1-7 = sidebar sections
+    const navMap = { "1": "home", "2": "recipes", "3": "ingredients", "4": "suppliers", "5": "dashboard", "6": "tools", "7": "order-sheet" };
+    if (navMap[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      showView(navMap[e.key]);
       return;
     }
   }
@@ -10916,6 +11626,119 @@ function logPriceChange(ing, oldCost, newCost) {
   });
 }
 
+// ─── Price Change Impact Alert ─────────────────────────────────
+function checkPriceImpact(ing, oldCost, newCost) {
+  if (!ing || oldCost === newCost || !oldCost || !newCost) return;
+  const pctChange = ((newCost - oldCost) / oldCost) * 100;
+  const cur = state.currency || "£";
+  const target = getFoodCostTarget();
+  // Find all recipes using this ingredient
+  const affected = [];
+  for (const r of state.recipes) {
+    const ri = (r.ingredients || []).find((x) => x.ingId === ing.id);
+    if (!ri) continue;
+    const portions = r.portions || 1;
+    const totalCost = recipeTotalCost(r);
+    const cpp = totalCost / portions;
+    const sellPrice = r.priceOverride || suggestPrice(cpp, state.activeGP);
+    if (!sellPrice || sellPrice <= 0) continue;
+    const foodCostPct = (cpp / sellPrice) * 100;
+    affected.push({ recipe: r, cpp, foodCostPct, overTarget: foodCostPct > target });
+  }
+  if (!affected.length) return;
+  const overCount = affected.filter((a) => a.overTarget).length;
+  const dir = pctChange > 0 ? "↑" : "↓";
+  const dirCol = pctChange > 0 ? "var(--red)" : "var(--green)";
+  // Build notification
+  let html =
+    `<div id="price-impact-banner" style="position:fixed;bottom:24px;right:24px;width:380px;max-height:340px;` +
+    `background:var(--bg-card);border:1px solid ${overCount ? "var(--red)" : "var(--border)"};border-radius:10px;` +
+    `box-shadow:0 8px 32px rgba(0,0,0,0.3);z-index:999;overflow:hidden;font-family:var(--font)">` +
+    `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">` +
+    `<span style="font-size:14px">${overCount ? "⚠️" : "ℹ️"}</span>` +
+    `<div style="flex:1;min-width:0">` +
+    `<div style="font-size:12px;font-weight:700;color:var(--text-primary)">${escHtml(ing.name)} <span style="color:${dirCol}">${dir} ${Math.abs(pctChange).toFixed(1)}%</span></div>` +
+    `<div style="font-size:11px;color:var(--text-muted)">${cur}${oldCost.toFixed(2)} → ${cur}${newCost.toFixed(2)} · affects ${affected.length} recipe${affected.length !== 1 ? "s" : ""}` +
+    (overCount ? ` · <span style="color:var(--red);font-weight:700">${overCount} over target</span>` : "") + `</div>` +
+    `</div>` +
+    `<button onclick="document.getElementById('price-impact-banner')?.remove()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:2px">✕</button>` +
+    `</div>`;
+  // Show affected recipes (max 6)
+  const show = affected.sort((a, b) => b.foodCostPct - a.foodCostPct).slice(0, 6);
+  html += '<div style="overflow-y:auto;max-height:240px;padding:6px 10px">';
+  show.forEach((a) => {
+    const col = a.overTarget ? "var(--red)" : "var(--green)";
+    html +=
+      `<div style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--border);cursor:pointer" ` +
+      `onclick="selectRecipe('${a.recipe.id}');showView('recipes');document.getElementById('price-impact-banner')?.remove()">` +
+      `<div style="flex:1;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.recipe.name)}</div>` +
+      `<div style="font-size:11px;color:var(--text-muted)">${cur}${a.cpp.toFixed(2)}/p</div>` +
+      `<div style="font-size:11px;font-weight:700;color:${col}">${a.foodCostPct.toFixed(1)}%</div>` +
+      `</div>`;
+  });
+  if (affected.length > 6)
+    html += `<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:6px">+ ${affected.length - 6} more</div>`;
+  html += "</div></div>";
+  // Remove any existing banner first
+  document.getElementById("price-impact-banner")?.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+  // Auto-dismiss after 12s
+  setTimeout(() => document.getElementById("price-impact-banner")?.remove(), 12000);
+}
+
+function checkBulkPriceImpact(changes) {
+  if (!changes.length) return;
+  const target = getFoodCostTarget();
+  const cur = state.currency || "£";
+  invalidateCostCache();
+  const affectedMap = new Map();
+  for (const r of state.recipes) {
+    const portions = r.portions || 1;
+    const totalCost = recipeTotalCost(r);
+    const cpp = totalCost / portions;
+    const sellPrice = r.priceOverride || suggestPrice(cpp, state.activeGP);
+    if (!sellPrice || sellPrice <= 0) continue;
+    const uses = changes.some(({ ing }) => (r.ingredients || []).some((ri) => ri.ingId === ing.id));
+    if (!uses) continue;
+    const foodCostPct = (cpp / sellPrice) * 100;
+    affectedMap.set(r.id, { recipe: r, cpp, foodCostPct, overTarget: foodCostPct > target });
+  }
+  const affected = [...affectedMap.values()];
+  if (!affected.length) return;
+  const overCount = affected.filter((a) => a.overTarget).length;
+  let html =
+    `<div id="price-impact-banner" style="position:fixed;bottom:24px;right:24px;width:380px;max-height:340px;` +
+    `background:var(--bg-card);border:1px solid ${overCount ? "var(--red)" : "var(--border)"};border-radius:10px;` +
+    `box-shadow:0 8px 32px rgba(0,0,0,0.3);z-index:999;overflow:hidden;font-family:var(--font)">` +
+    `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">` +
+    `<span style="font-size:14px">${overCount ? "⚠️" : "ℹ️"}</span>` +
+    `<div style="flex:1;min-width:0">` +
+    `<div style="font-size:12px;font-weight:700;color:var(--text-primary)">Bulk price update — ${changes.length} ingredients</div>` +
+    `<div style="font-size:11px;color:var(--text-muted)">${affected.length} recipe${affected.length !== 1 ? "s" : ""} affected` +
+    (overCount ? ` · <span style="color:var(--red);font-weight:700">${overCount} over target</span>` : "") + `</div>` +
+    `</div>` +
+    `<button onclick="document.getElementById('price-impact-banner')?.remove()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:2px">✕</button>` +
+    `</div>`;
+  const show = affected.sort((a, b) => b.foodCostPct - a.foodCostPct).slice(0, 6);
+  html += '<div style="overflow-y:auto;max-height:240px;padding:6px 10px">';
+  show.forEach((a) => {
+    const col = a.overTarget ? "var(--red)" : "var(--green)";
+    html +=
+      `<div style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--border);cursor:pointer" ` +
+      `onclick="selectRecipe('${a.recipe.id}');showView('recipes');document.getElementById('price-impact-banner')?.remove()">` +
+      `<div style="flex:1;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.recipe.name)}</div>` +
+      `<div style="font-size:11px;color:var(--text-muted)">${cur}${a.cpp.toFixed(2)}/p</div>` +
+      `<div style="font-size:11px;font-weight:700;color:${col}">${a.foodCostPct.toFixed(1)}%</div>` +
+      `</div>`;
+  });
+  if (affected.length > 6)
+    html += `<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:6px">+ ${affected.length - 6} more</div>`;
+  html += "</div></div>";
+  document.getElementById("price-impact-banner")?.remove();
+  document.body.insertAdjacentHTML("beforeend", html);
+  setTimeout(() => document.getElementById("price-impact-banner")?.remove(), 15000);
+}
+
 function showPriceHistory(ingId) {
   const ing = state.ingredients.find((i) => i.id === ingId);
   if (!ing) return;
@@ -11240,15 +12063,18 @@ function applyBulkPrices() {
   const modal = document.getElementById("bulk-price-modal");
   const pending = JSON.parse(modal.dataset.pending || "[]");
   let updated = 0;
+  const changes = [];
   pending.forEach(({ ingId, price }) => {
     const ing = state.ingredients.find((i) => i.id === ingId);
     if (!ing || ing.packCost === price) return;
+    const oldCost = ing.packCost;
     if (!ing.priceHistory) ing.priceHistory = [];
     ing.priceHistory.push({
       date: new Date().toISOString().slice(0, 10),
       packCost: ing.packCost,
     });
     ing.packCost = price;
+    changes.push({ ing, oldCost, newCost: price });
     updated++;
   });
   modal.classList.add("hidden");
@@ -11260,6 +12086,9 @@ function applyBulkPrices() {
     "success",
     2500,
   );
+  // Show impact for the biggest price change
+  if (changes.length === 1) checkPriceImpact(changes[0].ing, changes[0].oldCost, changes[0].newCost);
+  else if (changes.length > 1) checkBulkPriceImpact(changes);
 }
 
 async function loadBackupList() {
@@ -11319,9 +12148,166 @@ async function restoreFromBackup(filename) {
   }
 }
 
+// ─── Cloud Sync / Folder Backup ─────────────────────────────────
+function _getSyncSettings() {
+  try {
+    const raw = localStorage.getItem('cloudSyncSettings');
+    return raw ? JSON.parse(raw) : {};
+  } catch(e) { return {}; }
+}
+function _saveSyncSettings(s) {
+  localStorage.setItem('cloudSyncSettings', JSON.stringify(s));
+}
+
+async function chooseSyncFolder() {
+  const folder = await window.electronAPI.chooseSyncFolder();
+  if (!folder) return;
+  const s = _getSyncSettings();
+  s.folder = folder;
+  _saveSyncSettings(s);
+  _renderSyncUI();
+  showToast('Sync folder set: ' + folder, 'success', 3000);
+}
+
+function clearSyncFolder() {
+  if (!confirm('Disconnect cloud sync folder? Existing backups in the folder will not be deleted.')) return;
+  const s = _getSyncSettings();
+  delete s.folder;
+  s.autoSync = false;
+  _saveSyncSettings(s);
+  _renderSyncUI();
+  showToast('Cloud sync disconnected', 'info', 2000);
+}
+
+function openSyncFolder() {
+  const s = _getSyncSettings();
+  if (s.folder) window.electronAPI.openFolder(s.folder);
+}
+
+function toggleAutoSync() {
+  const s = _getSyncSettings();
+  const cb = document.getElementById('sync-auto-toggle');
+  s.autoSync = cb ? cb.checked : false;
+  _saveSyncSettings(s);
+  showToast(s.autoSync ? 'Auto-sync enabled' : 'Auto-sync disabled', 'info', 2000);
+}
+
+async function runSyncNow() {
+  const s = _getSyncSettings();
+  if (!s.folder) { showToast('No sync folder selected', 'error'); return; }
+  const statusEl = document.getElementById('sync-status');
+  if (statusEl) statusEl.textContent = 'Syncing…';
+  try {
+    const data = {
+      recipes: state.recipes,
+      ingredients: state.ingredients,
+      suppliers: state.suppliers,
+      settings: {
+        currency: state.currency,
+        activeGP: state.activeGP,
+        vatRate: state.vatRate,
+        recipeCategories: state.recipeCategories
+      },
+      exportDate: new Date().toISOString(),
+      version: state.version || '0.0.12'
+    };
+    const result = await window.electronAPI.syncBackupToFolder(s.folder, data);
+    if (result.error) {
+      showToast('Sync failed: ' + result.error, 'error', 4000);
+      if (statusEl) statusEl.textContent = 'Last sync failed: ' + result.error;
+    } else {
+      s.lastSync = new Date().toISOString();
+      _saveSyncSettings(s);
+      showToast('✓ Synced to cloud folder', 'success', 2500);
+      _renderSyncUI();
+    }
+  } catch(e) {
+    showToast('Sync failed: ' + e.message, 'error', 4000);
+    if (statusEl) statusEl.textContent = 'Sync error: ' + e.message;
+  }
+}
+
+async function _renderSyncUI() {
+  const s = _getSyncSettings();
+  const pathEl = document.getElementById('sync-folder-path');
+  const controlsEl = document.getElementById('sync-controls');
+  const openBtn = document.getElementById('btn-open-sync-folder');
+  const autoToggle = document.getElementById('sync-auto-toggle');
+  const statusEl = document.getElementById('sync-status');
+  const listEl = document.getElementById('sync-backup-list');
+
+  if (!pathEl) return;
+
+  if (s.folder) {
+    pathEl.textContent = s.folder;
+    pathEl.title = s.folder;
+    if (controlsEl) controlsEl.style.display = 'block';
+    if (openBtn) openBtn.style.display = '';
+    if (autoToggle) autoToggle.checked = !!s.autoSync;
+    if (statusEl) {
+      statusEl.textContent = s.lastSync
+        ? 'Last synced: ' + new Date(s.lastSync).toLocaleString()
+        : 'Never synced — click "Sync Now" to create first backup';
+    }
+
+    // Load cloud backup list
+    if (listEl) {
+      try {
+        const backups = await window.electronAPI.listSyncBackups(s.folder);
+        if (backups.length) {
+          listEl.innerHTML = backups.slice(0, 10).map(function(b) {
+            const date = new Date(b.mtime).toLocaleString();
+            const sizeKB = (b.size / 1024).toFixed(0);
+            return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm)">'
+              + '<span style="font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)">' + escHtml(b.name) + '</span>'
+              + '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0">' + sizeKB + ' KB · ' + date + '</span>'
+              + '<button class="btn-secondary btn-sm" onclick="restoreSyncBackup(\'' + escHtml(b.name) + '\')" style="font-size:11px;flex-shrink:0">Restore</button>'
+              + '</div>';
+          }).join('');
+        } else {
+          listEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">No backups in sync folder yet</div>';
+        }
+      } catch(e) {
+        listEl.innerHTML = '<div style="font-size:12px;color:var(--red)">Could not read sync folder</div>';
+      }
+    }
+  } else {
+    pathEl.textContent = 'No folder selected';
+    if (controlsEl) controlsEl.style.display = 'none';
+    if (openBtn) openBtn.style.display = 'none';
+  }
+}
+
+async function restoreSyncBackup(filename) {
+  const s = _getSyncSettings();
+  if (!s.folder) return;
+  if (!confirm('Restore from cloud backup "' + filename + '"?\n\nThis will replace all current data. A local backup will be made first.')) return;
+  try {
+    const result = await window.electronAPI.restoreSyncBackup(s.folder, filename);
+    if (result.error) { showToast('Restore failed: ' + result.error, 'error', 4000); return; }
+    // Apply the data
+    const data = result.data;
+    if (data.recipes) state.recipes = data.recipes;
+    if (data.ingredients) state.ingredients = data.ingredients;
+    if (data.suppliers) state.suppliers = data.suppliers;
+    if (data.settings) {
+      if (data.settings.currency) state.currency = data.settings.currency;
+      if (data.settings.activeGP) state.activeGP = data.settings.activeGP;
+      if (data.settings.vatRate !== undefined) state.vatRate = data.settings.vatRate;
+      if (data.settings.recipeCategories) state.recipeCategories = data.settings.recipeCategories;
+    }
+    await save();
+    showToast('✓ Cloud backup restored — reloading…', 'success', 2000);
+    setTimeout(function() { location.reload(); }, 1800);
+  } catch(e) {
+    showToast('Restore failed: ' + e.message, 'error', 4000);
+  }
+}
+
 function renderSettingsPage() {
   renderPinStatus();
   loadBackupList();
+  _renderSyncUI();
   // AI models
   const enabled = getAiEnabled();
   AI_MODELS.forEach(function (m) {
@@ -16507,6 +17493,22 @@ function renderToolsView() {
     (i) => !i.category || i.category === "Other",
   ).length;
 
+  // Supplier savings stats
+  const _supSavings = (() => {
+    let cheaperCount = 0;
+    state.ingredients.forEach((i) => {
+      if (!(i.altSuppliers || []).length || !i.packCost || !i.packSize) return;
+      const yld = (i.yieldPct || 100) / 100;
+      const primaryCpu = i.packCost / i.packSize / yld;
+      for (const alt of i.altSuppliers) {
+        if (!alt.packCost || !alt.packSize) continue;
+        const altCpu = alt.packCost / alt.packSize / yld;
+        if (altCpu < primaryCpu * 0.97) { cheaperCount++; break; }
+      }
+    });
+    return cheaperCount;
+  })();
+
   function toolCard(icon, title, desc, stat, statLabel, statColor, onclick) {
     const statHtml =
       stat !== null
@@ -16610,6 +17612,17 @@ function renderToolsView() {
         state.ingredients.filter(i => i.nutrition).length === state.ingredients.length && state.ingredients.length > 0
           ? "var(--green)" : "var(--accent)",
         "openNutritionScanner()",
+      ) +
+      toolCard(
+        "🏷",
+        "Supplier Price Compare",
+        "See every ingredient where a cheaper alternative supplier exists — switch in one click to save money",
+        _supSavings > 0 ? _supSavings : "✓",
+        _supSavings > 0
+          ? "ingredient" + (_supSavings !== 1 ? "s" : "") + " with cheaper alt"
+          : "All on best price",
+        _supSavings > 0 ? "var(--accent)" : "var(--green)",
+        "openSupplierSavingsPanel()",
       );
   }
 

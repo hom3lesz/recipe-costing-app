@@ -235,6 +235,70 @@ ipcMain.handle('restore-backup', (_, filename) => {
   return true;
 });
 
+// ─── Cloud Sync / Folder Backup ──────────────────────────────
+ipcMain.handle('choose-sync-folder', async () => {
+  const { filePaths, canceled } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose Cloud Sync Folder (Google Drive, Dropbox, OneDrive, or any folder)',
+    properties: ['openDirectory']
+  });
+  if (canceled || !filePaths.length) return null;
+  return filePaths[0];
+});
+
+ipcMain.handle('sync-backup-to-folder', async (_, { folderPath, data }) => {
+  try {
+    if (!folderPath || !fs.existsSync(folderPath)) return { error: 'Sync folder not found' };
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = 'recipe-costing-backup-' + stamp + '.json';
+    const dest = path.join(folderPath, filename);
+    fs.writeFileSync(dest, JSON.stringify(data, null, 2), 'utf8');
+
+    // Keep only last 10 sync backups in the folder
+    const allBackups = fs.readdirSync(folderPath)
+      .filter(f => f.startsWith('recipe-costing-backup-') && f.endsWith('.json'))
+      .sort()
+      .reverse();
+    if (allBackups.length > 10) {
+      allBackups.slice(10).forEach(f => {
+        try { fs.unlinkSync(path.join(folderPath, f)); } catch(e) {}
+      });
+    }
+    return { ok: true, path: dest, filename };
+  } catch(e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('list-sync-backups', async (_, folderPath) => {
+  try {
+    if (!folderPath || !fs.existsSync(folderPath)) return [];
+    return fs.readdirSync(folderPath)
+      .filter(f => f.startsWith('recipe-costing-backup-') && f.endsWith('.json'))
+      .sort()
+      .reverse()
+      .map(f => {
+        const stat = fs.statSync(path.join(folderPath, f));
+        return { name: f, size: stat.size, mtime: stat.mtime.toISOString() };
+      });
+  } catch(e) { return []; }
+});
+
+ipcMain.handle('restore-sync-backup', async (_, { folderPath, filename }) => {
+  try {
+    if (!/^recipe-costing-backup-[\d\-T]+\.json$/.test(filename)) throw new Error('Invalid filename');
+    const src = path.join(folderPath, filename);
+    if (!fs.existsSync(src)) throw new Error('Backup not found');
+    const raw = fs.readFileSync(src, 'utf8');
+    return { data: JSON.parse(raw) };
+  } catch(e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('open-folder', (_, folderPath) => {
+  if (folderPath && fs.existsSync(folderPath)) shell.openPath(folderPath);
+});
+
 // Open file dialog and return raw xlsx buffer as base64
 ipcMain.handle('open-excel', async () => {
   const { filePaths, canceled } = await dialog.showOpenDialog(mainWindow, {

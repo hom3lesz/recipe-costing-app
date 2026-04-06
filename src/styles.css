@@ -1748,20 +1748,46 @@ input[type=range].gp-slider {
 
 /* Light theme overrides */
 [data-theme="light"] {
-  --bg-app:       #eeeee8;
+  --bg-app:       #f0f0ec;
   --bg-sidebar:   #f7f7f4;
-  --bg-card:      #fafaf8;
-  --bg-card2:     #f2f2ef;
-  --bg-input:     #efefeb;
+  --bg-card:      #ffffff;
+  --bg-card2:     #f5f5f2;
+  --bg-input:     #ffffff;
   --bg-hover:     #e8e8e3;
   --border:       #d4d4cc;
-  --border-light: #c8c8be;
+  --border-light: #c0c0b8;
+
+  --accent:       #c4880a;
+  --accent-dim:   #a87508;
+  --accent-bg:    rgba(196,136,10,0.1);
+  --accent-glow:  rgba(196,136,10,0.18);
+
+  --green:        #2e8b57;
+  --green-bg:     rgba(46,139,87,0.1);
+  --red:          #d14040;
+  --red-bg:       rgba(209,64,64,0.1);
+  --blue:         #3b6fd6;
+  --blue-bg:      rgba(59,111,214,0.1);
+
   --text-primary:   #1a1a1a;
   --text-secondary: #4a4a44;
-  --text-muted:     #888880;
-  --accent-bg:    rgba(245,158,11,0.1);
-  --accent-dim:   rgba(245,158,11,0.25);
+  --text-muted:     #8a8a82;
+
+  --shadow: 0 2px 12px rgba(0,0,0,0.08);
 }
+[data-theme="light"] .sidebar { background: var(--bg-sidebar); }
+[data-theme="light"] .modal { box-shadow: 0 8px 40px rgba(0,0,0,0.15); }
+[data-theme="light"] .btn-primary { color: #fff; }
+[data-theme="light"] .recipe-status-btn { border-color: var(--border); }
+[data-theme="light"] input, [data-theme="light"] select, [data-theme="light"] textarea {
+  background: var(--bg-input); border-color: var(--border); color: var(--text-primary);
+}
+[data-theme="light"] .modal-overlay { background: rgba(0,0,0,0.3); }
+[data-theme="light"] .ing-dd-item:hover { background: var(--bg-hover); }
+[data-theme="light"] ::-webkit-scrollbar-track { background: var(--bg-card2); }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: var(--border); }
+[data-theme="light"] .toast { box-shadow: 0 2px 16px rgba(0,0,0,0.1); }
+[data-theme="light"] .nutrition-card .nut-item { background: var(--bg-card2); border-color: var(--border); }
 
 /* ─── Recipe Tags ─── */
 .tag-editor {

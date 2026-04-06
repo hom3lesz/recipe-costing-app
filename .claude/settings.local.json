@@ -9,7 +9,11 @@
       "Bash(node --check \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\src\\\\app.js\")",
       "Bash(node --check \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\src\\\\preload.js\")",
       "Bash(node --check \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\main.js\")",
-      "Bash(ls -la \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\src\"\" 2>/dev/null || ls -la \"C:UsersgytodDesktoprecipe-costing-app\"\")"
+      "Bash(ls -la \"C:\\\\Users\\\\gytod\\\\Desktop\\\\recipe-costing-app\\\\src\"\" 2>/dev/null || ls -la \"C:UsersgytodDesktoprecipe-costing-app\"\")",
+      "Bash(node -c src/app.js)",
+      "Bash(node -c main.js)",
+      "Bash(node -c src/preload.js)",
+      "Bash(node -e \":*)"
     ]
   }
 }
