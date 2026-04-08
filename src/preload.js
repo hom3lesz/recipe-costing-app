@@ -5,6 +5,7 @@
  */
 const { contextBridge, ipcRenderer } = require('electron');
 const XLSX = require('xlsx');
+const QRCode = require('qrcode');
 
 contextBridge.exposeInMainWorld('electronAPI', {
 
@@ -48,6 +49,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Backup management ──────────────────────────────────────────
   listBackups:    ()         => ipcRenderer.invoke('list-backups'),
   restoreBackup:  (filename) => ipcRenderer.invoke('restore-backup', filename),
+
+  // ── QR Code Generation ──────────────────────────────────────────
+  generateQR: (text, opts) => QRCode.toDataURL(text, { width: (opts && opts.width) || 256, margin: 1, color: { dark: '#000000', light: '#ffffff' }, errorCorrectionLevel: 'M', ...opts }),
 
   // ── Cloud Sync / Folder Backup ─────────────────────────────────
   chooseSyncFolder:   ()                  => ipcRenderer.invoke('choose-sync-folder'),

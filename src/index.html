@@ -209,6 +209,14 @@
             <option value="price">Price ↓</option>
             <option value="gp">GP % ↓</option>
           </select>
+          <div style="display:flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-left:4px">
+            <button id="rl-view-list" onclick="setRecipeView('list')" title="List view" style="padding:5px 8px;background:var(--accent-bg);border:none;cursor:pointer;color:var(--accent);display:flex;align-items:center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+            <button id="rl-view-gallery" onclick="setRecipeView('gallery')" title="Photo gallery" style="padding:5px 8px;background:transparent;border:none;border-left:1px solid var(--border);cursor:pointer;color:var(--text-muted);display:flex;align-items:center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            </button>
+          </div>
         </div>
         <div id="rl-tag-bar" style="display:none;padding:4px 16px 6px;gap:5px;flex-wrap:wrap;align-items:center;flex-shrink:0"></div>
         <!-- Recipe bulk action bar -->
@@ -1126,10 +1134,19 @@
         <div id="invoice-results-body"></div>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeInvoiceModal()">Cancel</button>
-      <button class="btn-primary" id="invoice-scan-btn" onclick="startInvoiceScan()">📂 Choose Invoice File(s)</button>
-      <button class="btn-primary hidden" id="invoice-apply-btn" onclick="applyInvoiceUpdates()">Apply Price Updates</button>
+    <div class="modal-footer" style="justify-content:space-between">
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--text-secondary)">
+          <input type="checkbox" id="inv-credit-note" style="accent-color:var(--red);width:15px;height:15px;cursor:pointer">
+          <span>Credit Note</span>
+        </label>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-secondary" onclick="closeInvoiceModal()">Cancel</button>
+        <button class="btn-secondary" id="invoice-manual-btn" onclick="openManualInvoiceEntry()">✏ Add Manually</button>
+        <button class="btn-primary" id="invoice-scan-btn" onclick="startInvoiceScan()">📂 Choose Invoice File(s)</button>
+        <button class="btn-primary hidden" id="invoice-apply-btn" onclick="applyInvoiceUpdates()">Apply Price Updates</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1442,6 +1459,9 @@
       </label>
       <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);cursor:pointer;white-space:nowrap">
         <input type="checkbox" id="mp-show-gp" onchange="renderMenuPrintPreview()" style="accent-color:var(--accent)"> Show GP%
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);cursor:pointer;white-space:nowrap">
+        <input type="checkbox" id="mp-show-allergens" onchange="renderMenuPrintPreview()" checked style="accent-color:var(--accent)"> Show allergens
       </label>
       <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
         <span style="font-size:11px;color:var(--text-muted)">Menu title:</span>

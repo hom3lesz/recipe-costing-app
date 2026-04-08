@@ -2233,6 +2233,23 @@ function clearRlTagFilters() {
   renderRecipeList();
 }
 
+var _rlViewMode = 'list'; // 'list' or 'gallery'
+function setRecipeView(mode) {
+  _rlViewMode = mode;
+  // Update toggle button styles
+  var listBtn = document.getElementById('rl-view-list');
+  var galBtn = document.getElementById('rl-view-gallery');
+  if (listBtn) {
+    listBtn.style.background = mode === 'list' ? 'var(--accent-bg)' : 'transparent';
+    listBtn.style.color = mode === 'list' ? 'var(--accent)' : 'var(--text-muted)';
+  }
+  if (galBtn) {
+    galBtn.style.background = mode === 'gallery' ? 'var(--accent-bg)' : 'transparent';
+    galBtn.style.color = mode === 'gallery' ? 'var(--accent)' : 'var(--text-muted)';
+  }
+  renderRecipeList();
+}
+
 function renderRecipeList() {
   invalidateMaps();
   invalidateCostCache();
@@ -2493,6 +2510,11 @@ function renderRecipeList() {
     }
   });
 
+  if (_rlViewMode === 'gallery') {
+    _renderRecipeGallery(container, recipes, cur, target);
+    return;
+  }
+
   container.innerHTML = `
     <table class="rl-table dash-table" style="margin:0">
       <thead>
@@ -2514,6 +2536,51 @@ function renderRecipeList() {
   _recRenderedTo = 0;
   _recAppendRows(tbody, REC_PAGE_SIZE);
   _recSetupScroll(tbody);
+}
+
+function _renderRecipeGallery(container, recipes, cur, target) {
+  var cards = recipes.map(function(r) {
+    var totalCost = recipeTotalCost(r);
+    var portions = r.portions || 1;
+    var cpp = totalCost / portions;
+    var price = r.priceOverride;
+    var gp = price ? ((price - cpp) / price) * 100 : null;
+    var fc = price ? (cpp / price) * 100 : null;
+    var gpCol = !price ? 'var(--text-muted)' : fc <= target ? 'var(--green)' : fc <= target + 5 ? 'var(--accent)' : 'var(--red)';
+    var allergens = recipeAllergens(r);
+    var alStr = allergens.length ? allergens.slice(0, 3).join(', ') + (allergens.length > 3 ? ' +' + (allergens.length - 3) : '') : '';
+
+    var photoHtml = r.photo
+      ? '<img src="' + r.photo + '" style="width:100%;height:100%;object-fit:cover" />'
+      : '<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg-card2);color:var(--text-muted)">'
+        + '<span style="font-size:36px;margin-bottom:4px">📷</span>'
+        + '<span style="font-size:10px">No photo</span></div>';
+
+    var catBadge = r.category
+      ? '<span style="position:absolute;top:8px;left:8px;font-size:9px;font-weight:700;background:rgba(0,0,0,.55);color:#fff;padding:2px 7px;border-radius:3px;text-transform:uppercase;letter-spacing:.5px">' + escHtml(r.category) + '</span>'
+      : '';
+
+    var gpBadge = gp !== null
+      ? '<span style="position:absolute;top:8px;right:8px;font-size:10px;font-weight:800;background:' + (fc <= target ? 'rgba(34,197,94,.85)' : fc <= target + 5 ? 'rgba(232,124,46,.85)' : 'rgba(220,38,38,.85)') + ';color:#fff;padding:2px 7px;border-radius:3px">' + gp.toFixed(0) + '%</span>'
+      : '';
+
+    return '<div class="rg-card" onclick="openRecipeFromList(\'' + r.id + '\')" style="cursor:pointer;border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;background:var(--bg-card);transition:transform .15s,box-shadow .15s">'
+      + '<div style="position:relative;width:100%;height:160px;overflow:hidden">' + photoHtml + catBadge + gpBadge + '</div>'
+      + '<div style="padding:10px 12px">'
+      + '<div style="font-weight:700;font-size:13px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + escAttr(r.name) + '">' + escHtml(r.name) + '</div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'
+      + '<div style="font-size:11px;color:var(--text-secondary)">'
+      + '<span style="font-weight:600">Cost:</span> ' + cur + cpp.toFixed(2)
+      + (price ? ' &nbsp;·&nbsp; <span style="font-weight:600">Sell:</span> ' + cur + price.toFixed(2) : '')
+      + '</div>'
+      + (gp !== null ? '<span style="font-size:11px;font-weight:800;color:' + gpCol + '">' + gp.toFixed(0) + '% GP</span>' : '')
+      + '</div>'
+      + (alStr ? '<div style="margin-top:5px;font-size:10px;color:var(--text-muted)">⚠ ' + escHtml(alStr) + '</div>' : '')
+      + '<div style="margin-top:5px;font-size:10px;color:var(--text-muted)">' + portions + ' portion' + (portions !== 1 ? 's' : '') + ' · ' + r.ingredients.length + ' ingredient' + (r.ingredients.length !== 1 ? 's' : '') + '</div>'
+      + '</div></div>';
+  }).join('');
+
+  container.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;padding:16px">' + cards + '</div>';
 }
 
 function onRlCheckChange() {
@@ -3921,6 +3988,9 @@ function showRecipeContextMenu(e, id) {
     <div class="ctx-item" onclick="selectRecipe('${id}');showView('recipes');setTimeout(()=>printRecipe('${id}'),100);document.getElementById('recipe-ctx-menu')?.remove()">
       🖨 Print Cost Sheet
     </div>
+    <div class="ctx-item" onclick="printAllergenQRCard('${id}');document.getElementById('recipe-ctx-menu')?.remove()">
+      📱 Allergen QR Card
+    </div>
     ${
       state.locations.length > 0
         ? `<div class="ctx-item" onclick="openCopyToLocation('${id}');document.getElementById('recipe-ctx-menu')?.remove()">
@@ -4031,6 +4101,7 @@ function renderRecipeEditor() {
               <div class="rh-more-item" onclick="printAllergenSheet();closeRecipeMoreMenu('${recipe.id}')">⚠️ Allergen sheet</div>
               <div class="rh-more-item" onclick="openRecipeImport();closeRecipeMoreMenu('${recipe.id}')">✨ Import recipe (AI)</div>
               <div class="rh-more-item" onclick="printRecipeCard('${recipe.id}');closeRecipeMoreMenu('${recipe.id}')">🪪 Recipe card</div>
+              <div class="rh-more-item" onclick="printAllergenQRCard('${recipe.id}');closeRecipeMoreMenu('${recipe.id}')">📱 Allergen QR card</div>
               <div class="rh-more-item" onclick="showRecipePhoto('${recipe.id}');closeRecipeMoreMenu('${recipe.id}')">📷 Photo${recipe.photo ? " ✓" : ""}</div>
             </div>
           </div>
@@ -8212,15 +8283,32 @@ function exportBatchPDF() {
       + '<h2 style="font-size:20px;font-weight:900;margin:2px 0 0">' + escHtml(recipe.name) + '</h2>'
       + '<div style="font-size:11px;color:#666">' + escHtml(recipe.category || '—') + ' · ' + portions + ' portion' + (portions !== 1 ? 's' : '') + '</div></div>'
       + '<div style="text-align:right;font-size:11px;color:#888"><div>GP Target: <b>' + gp + '%</b></div><div>' + date + '</div></div></div>'
-      + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">'
-      + '<div class="kpi"><div class="kpi-l">Food Cost</div><div class="kpi-v">' + cur + cpp.toFixed(2) + '</div></div>'
-      + '<div class="kpi" style="background:#1a1a2e;color:#fff;border-color:#1a1a2e"><div class="kpi-l" style="color:rgba(255,255,255,.6)">Sell Price</div><div class="kpi-v">' + cur + price.toFixed(2) + (isOverride ? ' <span style="font-size:9px;opacity:.7">override</span>' : '') + '</div></div>'
-      + '<div class="kpi" style="background:#e87c2e;color:#fff;border-color:#e87c2e"><div class="kpi-l" style="color:rgba(255,255,255,.6)">Profit</div><div class="kpi-v">' + cur + profit.toFixed(2) + '</div></div>'
-      + '<div class="kpi"><div class="kpi-l">GP%</div><div class="kpi-v" style="color:' + (gpPct >= 70 ? '#059669' : gpPct >= 60 ? '#e87c2e' : '#dc2626') + '">' + gpPct.toFixed(1) + '%</div></div></div>'
+      + (function() {
+          var priceWithVat = vatRate > 0 ? price * (1 + vatRate / 100) : price;
+          return '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">'
+            + '<div class="kpi"><div class="kpi-l">Food Cost</div><div class="kpi-v">' + cur + cpp.toFixed(2) + '</div></div>'
+            + '<div class="kpi" style="background:#1a1a2e;color:#fff;border-color:#1a1a2e"><div class="kpi-l" style="color:rgba(255,255,255,.6)">Sell Price (ex VAT)</div><div class="kpi-v">' + cur + price.toFixed(2) + (isOverride ? ' <span style="font-size:9px;opacity:.7">override</span>' : '') + '</div></div>'
+            + '<div class="kpi" style="background:#2d2d5e;color:#fff;border-color:#2d2d5e"><div class="kpi-l" style="color:rgba(255,255,255,.6)">Sell Price (inc VAT' + (vatRate > 0 ? ' ' + vatRate + '%' : '') + ')</div><div class="kpi-v">' + cur + priceWithVat.toFixed(2) + '</div></div>'
+            + '<div class="kpi" style="background:#e87c2e;color:#fff;border-color:#e87c2e"><div class="kpi-l" style="color:rgba(255,255,255,.6)">Profit</div><div class="kpi-v">' + cur + profit.toFixed(2) + '</div></div>'
+            + '<div class="kpi"><div class="kpi-l">GP%</div><div class="kpi-v" style="color:' + (gpPct >= 70 ? '#059669' : gpPct >= 60 ? '#e87c2e' : '#dc2626') + '">' + gpPct.toFixed(1) + '%</div></div></div>';
+        })()
       + '<table><thead><tr><th>Ingredient</th><th style="text-align:right">Qty</th><th style="text-align:right">Cost</th><th style="text-align:right">%</th></tr></thead>'
       + '<tbody>' + ingRows + subRows + '</tbody>'
       + '<tfoot><tr><td colspan="2"><b>Total</b></td><td style="text-align:right"><b>' + cur + totalCost.toFixed(2) + '</b></td><td></td></tr></tfoot></table>'
       + (allergens.length ? '<div style="margin-top:10px;padding:8px 12px;background:#fff7f0;border:1px solid #e87c2e;border-radius:5px;font-size:11px;color:#c85a00"><b>⚠ Allergens:</b> ' + allergens.join(' · ') + '</div>' : '')
+      + (function() {
+          var n = recipeNutritionTotal(recipe);
+          if (!n || (!n.kcal && !n.protein && !n.fat && !n.carbs)) return '';
+          return '<div style="margin-top:10px;display:flex;gap:0;border:1px solid #e0e0e8;border-radius:6px;overflow:hidden;font-size:11px">'
+            + [['Calories', Math.round(n.kcal) + 'kcal'], ['Protein', n.protein.toFixed(1) + 'g'], ['Fat', n.fat.toFixed(1) + 'g'], ['Carbs', n.carbs.toFixed(1) + 'g'],
+               ['Fibre', (n.fibre || 0).toFixed(1) + 'g'], ['Salt', (n.salt || 0).toFixed(2) + 'g']]
+              .map(function(pair) {
+                return '<div style="flex:1;text-align:center;padding:6px 4px;border-right:1px solid #e0e0e8">'
+                  + '<div style="font-size:13px;font-weight:800;color:#1a1a2e">' + pair[1] + '</div>'
+                  + '<div style="font-size:8px;text-transform:uppercase;letter-spacing:.5px;color:#999">' + pair[0] + '</div></div>';
+              }).join('')
+            + '</div>';
+        })()
       + '</div>';
   }).join('');
 
@@ -11104,118 +11192,94 @@ function toggleSupplierBody(supId) {
 }
 
 function buildInvoiceHistory(sup) {
-  const history = (sup.invoiceHistory || []).slice(0, 10);
-  if (!history.length) return "";
-  const totalSpend = (sup.invoiceHistory || []).reduce(
+  const allHistory = sup.invoiceHistory || [];
+  if (!allHistory.length) return "";
+  const totalSpend = allHistory.reduce(
     (s, i) => s + (i.total || 0),
     0,
   );
+  const creditTotal = allHistory.filter(function(i) { return i.isCredit || (i.total || 0) < 0; }).reduce(function(s, i) { return s + Math.abs(i.total || 0); }, 0);
 
-  const rows = history
-    .map(function (inv) {
-      const changes = [];
-      if (inv.updatedCount)
-        changes.push(
-          '<span style="color:var(--green)">' +
-            inv.updatedCount +
-            " updated</span>",
-        );
-      if (inv.addedCount)
-        changes.push(
-          '<span style="color:var(--blue)">' + inv.addedCount + " added</span>",
-        );
-      const _d =
-        inv.date && inv.date !== "undefined" && inv.date !== "null"
-          ? new Date(inv.date + "T00:00:00")
-          : null;
-      const dateStr =
-        _d && !isNaN(_d)
-          ? _d.toLocaleDateString("en-GB", {
-              day: "2-digit",
-              month: "short",
-              year: "numeric",
-            })
-          : "—";
-      const fileName = inv.fileName
-        ? '<span style="font-size:10px;color:var(--text-muted)">' +
-          escHtml(inv.fileName) +
-          "</span>"
-        : "";
-      return (
-        '<tr class="invoice-history-row" data-sup="' +
-        escAttr(sup.id) +
-        '" data-inv="' +
-        escAttr(inv.id) +
-        '">' +
-        '<td class="inv-td" style="white-space:nowrap">' +
-        dateStr +
-        "</td>" +
-        '<td class="inv-td" style="overflow:hidden;min-width:0">' +
-        '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">' +
-        '<span style="font-weight:700;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
-        escHtml(
-          inv.invoiceNumber &&
-            inv.invoiceNumber !== "undefined" &&
-            inv.invoiceNumber !== "null"
-            ? inv.invoiceNumber
-            : "—",
-        ) +
-        "</span>" +
-        (inv.total
-          ? '<span style="color:var(--accent);font-weight:700;font-size:12px;white-space:nowrap">' +
-            fmt(inv.total) +
-            "</span>"
-          : "") +
-        "</div>" +
-        (changes.length
-          ? '<div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap">' +
-            changes
-              .map(function (c) {
-                return '<span style="font-size:10px">' + c + "</span>";
-              })
-              .join("") +
-            "</div>"
-          : "") +
-        (fileName
-          ? '<div style="margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
-            fileName +
-            "</div>"
-          : "") +
-        "</td>" +
-        '<td class="inv-td" style="white-space:nowrap;text-align:right;vertical-align:middle">' +
-        '<button class="btn-secondary btn-sm inv-view-btn" data-sup="' +
-        escAttr(sup.id) +
-        '" data-inv="' +
-        escAttr(inv.id) +
-        '">View</button>' +
-        '<button class="btn-icon danger inv-del-btn" data-sup="' +
-        escAttr(sup.id) +
-        '" data-inv="' +
-        escAttr(inv.id) +
-        '" title="Delete" style="margin-left:6px;width:22px;height:22px;font-size:12px;display:inline-flex;align-items:center;justify-content:center">✕</button>' +
-        "</td></tr>"
-      );
-    })
-    .join("");
+  // Group by month
+  const months = {};
+  allHistory.forEach(function(inv) {
+    var _d = inv.date && inv.date !== "undefined" && inv.date !== "null"
+      ? new Date(inv.date + "T00:00:00") : null;
+    var key = _d && !isNaN(_d) ? _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0') : 'unknown';
+    if (!months[key]) months[key] = { invoices: [], label: '', total: 0 };
+    months[key].invoices.push(inv);
+    months[key].total += (inv.total || 0);
+    if (_d && !isNaN(_d)) {
+      months[key].label = _d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    } else {
+      months[key].label = 'Unknown date';
+    }
+  });
 
-  return (
-    '<div class="inv-hist-wrap">' +
-    '<table style="width:100%;border-collapse:collapse;font-size:11px">' +
-    '<colgroup><col style="width:88px"><col style="min-width:0"><col style="width:88px"></colgroup>' +
-    '<thead><tr class="inv-thead">' +
-    '<th class="inv-th">Date</th>' +
-    '<th class="inv-th">Invoice</th>' +
-    '<th class="inv-th"></th>' +
-    "</tr></thead><tbody>" +
-    rows +
-    "</tbody></table>" +
-    (sup.invoiceHistory.length > 10
-      ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">Showing latest 10 of ' +
-        sup.invoiceHistory.length +
-        "</div>"
-      : "") +
-    "</div>"
-  );
+  // Sort month keys newest first
+  var sortedKeys = Object.keys(months).sort().reverse();
+
+  function _buildInvRow(inv) {
+    var changes = [];
+    if (inv.updatedCount)
+      changes.push('<span style="color:var(--green)">' + inv.updatedCount + " updated</span>");
+    if (inv.addedCount)
+      changes.push('<span style="color:var(--blue)">' + inv.addedCount + " added</span>");
+    var _d = inv.date && inv.date !== "undefined" && inv.date !== "null"
+      ? new Date(inv.date + "T00:00:00") : null;
+    var dateStr = _d && !isNaN(_d)
+      ? _d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
+      : "—";
+    var fileName = inv.fileName
+      ? '<span style="font-size:10px;color:var(--text-muted)">' + escHtml(inv.fileName) + "</span>"
+      : "";
+    var isCredit = inv.isCredit || (inv.total || 0) < 0;
+    var totalCol = isCredit ? 'var(--red)' : 'var(--accent)';
+    var creditBadge = isCredit ? '<span style="font-size:9px;font-weight:700;background:rgba(239,68,68,.15);color:var(--red);padding:1px 5px;border-radius:3px;margin-left:4px">CREDIT</span>' : '';
+    var creditAppliedBadge = inv.creditApplied ? '<span style="font-size:9px;font-weight:400;color:var(--red);margin-left:4px">(-' + fmt(inv.creditApplied) + ' credit)</span>' : '';
+    return (
+      '<tr class="invoice-history-row" data-sup="' + escAttr(sup.id) + '" data-inv="' + escAttr(inv.id) + '">' +
+      '<td class="inv-td" style="white-space:nowrap">' + dateStr + "</td>" +
+      '<td class="inv-td" style="overflow:hidden;min-width:0">' +
+      '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">' +
+      '<span style="font-weight:700;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+      escHtml(inv.invoiceNumber && inv.invoiceNumber !== "undefined" && inv.invoiceNumber !== "null" ? inv.invoiceNumber : "—") +
+      "</span>" + creditBadge +
+      (inv.total ? '<span style="color:' + totalCol + ';font-weight:700;font-size:12px;white-space:nowrap">' + fmt(Math.abs(inv.total)) + (isCredit ? ' CR' : '') + "</span>" : "") + creditAppliedBadge +
+      "</div>" +
+      (changes.length ? '<div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap">' + changes.map(function(c) { return '<span style="font-size:10px">' + c + "</span>"; }).join("") + "</div>" : "") +
+      (fileName ? '<div style="margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + fileName + "</div>" : "") +
+      "</td>" +
+      '<td class="inv-td" style="white-space:nowrap;text-align:right;vertical-align:middle">' +
+      '<button class="btn-secondary btn-sm inv-view-btn" data-sup="' + escAttr(sup.id) + '" data-inv="' + escAttr(inv.id) + '">View</button>' +
+      '<button class="btn-icon danger inv-del-btn" data-sup="' + escAttr(sup.id) + '" data-inv="' + escAttr(inv.id) + '" title="Delete" style="margin-left:6px;width:22px;height:22px;font-size:12px;display:inline-flex;align-items:center;justify-content:center">✕</button>' +
+      "</td></tr>"
+    );
+  }
+
+  var monthSections = sortedKeys.map(function(key) {
+    var m = months[key];
+    var monthTotal = m.total;
+    var invoiceCount = m.invoices.length;
+    var monthRows = m.invoices.map(_buildInvRow).join('');
+    var totalCol = monthTotal < 0 ? 'var(--red)' : 'var(--accent)';
+    return '<div class="inv-month-group" style="margin-bottom:4px">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--bg-sidebar);border-radius:var(--radius-sm);margin-bottom:2px;cursor:pointer" onclick="this.parentElement.querySelector(\'.inv-month-body\').classList.toggle(\'hidden\')">'
+      + '<span style="font-size:11px;font-weight:700;color:var(--text-secondary)">' + escHtml(m.label) + ' <span style="font-weight:400;color:var(--text-muted)">(' + invoiceCount + ')</span></span>'
+      + '<span style="font-size:11px;font-weight:700;color:' + totalCol + '">' + fmt(Math.abs(monthTotal)) + (monthTotal < 0 ? ' CR' : '') + '</span>'
+      + '</div>'
+      + '<table class="inv-month-body" style="width:100%;border-collapse:collapse;font-size:11px">'
+      + '<colgroup><col style="width:60px"><col style="min-width:0"><col style="width:88px"></colgroup>'
+      + '<tbody>' + monthRows + '</tbody></table></div>';
+  }).join('');
+
+  var summaryLine = '<div style="display:flex;gap:12px;font-size:11px;margin-bottom:8px;padding:6px 8px;background:var(--bg-card2);border-radius:var(--radius-sm)">'
+    + '<span style="color:var(--text-muted)">Total: <b style="color:var(--accent)">' + fmt(totalSpend) + '</b></span>'
+    + (creditTotal > 0 ? '<span style="color:var(--text-muted)">Credits: <b style="color:var(--red)">' + fmt(creditTotal) + '</b></span>' : '')
+    + '<span style="color:var(--text-muted)">' + allHistory.length + ' invoice' + (allHistory.length !== 1 ? 's' : '') + '</span>'
+    + '</div>';
+
+  return '<div class="inv-hist-wrap">' + summaryLine + monthSections + "</div>";
 }
 
 // Escape a value for use inside an HTML attribute (double-quoted)
@@ -11317,13 +11381,25 @@ function openInvoiceDetail(supplierId, invoiceId) {
       "</div>";
   }
 
+  var isCreditInv = inv.isCredit || (inv.total || 0) < 0;
   document.getElementById("invoice-detail-supplier").textContent = sup.name;
-  document.getElementById("invoice-detail-number").textContent =
-    inv.invoiceNumber || "No invoice number";
+  document.getElementById("invoice-detail-number").innerHTML =
+    escHtml(inv.invoiceNumber || "No invoice number") +
+    (isCreditInv ? ' <span style="font-size:11px;font-weight:700;background:rgba(239,68,68,.15);color:var(--red);padding:2px 7px;border-radius:4px">CREDIT NOTE</span>' : '');
   document.getElementById("invoice-detail-date").textContent = dateStr;
-  document.getElementById("invoice-detail-total").textContent = inv.total
-    ? fmt(inv.total)
+  var _totalHtml = inv.total
+    ? '<span style="color:' + (isCreditInv ? 'var(--red)' : 'var(--accent)') + ';font-weight:700">' + fmt(Math.abs(inv.total)) + (isCreditInv ? ' CR' : '') + '</span>'
     : "—";
+  if (inv.creditApplied) {
+    _totalHtml += ' <span style="font-size:11px;color:var(--red)">(-' + fmt(inv.creditApplied) + ' credit applied → net ' + fmt(Math.abs(inv.total) - inv.creditApplied) + ')</span>';
+  }
+  if (isCreditInv && inv.linkedInvoiceId) {
+    var _linkedInv = (sup.invoiceHistory || []).find(function(i) { return i.id === inv.linkedInvoiceId; });
+    if (_linkedInv) {
+      _totalHtml += '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Linked to invoice: <b>' + escHtml(_linkedInv.invoiceNumber || '—') + '</b></div>';
+    }
+  }
+  document.getElementById("invoice-detail-total").innerHTML = _totalHtml;
   document.getElementById("invoice-detail-lines").innerHTML = linesHtml;
   document.getElementById("invoice-detail-modal").dataset.supplierId =
     supplierId;
@@ -12440,6 +12516,19 @@ function openInvoiceModal(supplierId) {
   modal.dataset.invoiceDate = "";
   modal.dataset.invoiceTotal = "";
 
+  // Reset credit note checkbox and remove any old credit-link row
+  var creditCb = document.getElementById("inv-credit-note");
+  if (creditCb) {
+    creditCb.checked = false;
+    creditCb.onchange = function() { _toggleCreditLinkDropdown(supplierId); };
+  }
+  var oldCreditLink = document.getElementById("credit-link-row");
+  if (oldCreditLink) oldCreditLink.remove();
+
+  // Show manual button
+  var manualBtn = document.getElementById("invoice-manual-btn");
+  if (manualBtn) manualBtn.classList.remove("hidden");
+
   modal.classList.remove("hidden");
   rebuildModelDropdown();
   updateInvoiceModelUI();
@@ -12455,6 +12544,335 @@ function closeInvoiceModal() {
   // Reset scan button so it's ready next time
   document.getElementById("invoice-scan-btn").classList.remove("hidden");
   document.getElementById("invoice-apply-btn").classList.add("hidden");
+}
+
+function openManualInvoiceEntry() {
+  const modal = document.getElementById("invoice-modal");
+  const suppId = modal.dataset.supplierId;
+  const isCredit = document.getElementById("inv-credit-note")?.checked || false;
+
+  // Build manual entry form in results area
+  const resultsBody = document.getElementById("invoice-results-body");
+  const resultsWrap = document.getElementById("invoice-results");
+  resultsWrap.classList.remove("hidden");
+  document.getElementById("invoice-scan-btn").classList.add("hidden");
+  document.getElementById("invoice-manual-btn").classList.add("hidden");
+  document.getElementById("invoice-status").innerHTML =
+    (isCredit ? '<span style="color:var(--red);font-weight:700">📋 Credit Note</span> — ' : '') +
+    'Add line items manually. Each row is one ingredient from the invoice.';
+
+  // Pre-fill date to today if empty
+  var dateEl = document.getElementById("inv-date");
+  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+
+  // Credit note: show "link to invoice" selector
+  var _creditLinkHtml = '';
+  if (isCredit && suppId) {
+    var _sup = state.suppliers.find(function(s) { return s.id === suppId; });
+    var _invoices = (_sup && _sup.invoiceHistory || []).filter(function(i) { return !i.isCredit && (i.total || 0) > 0; });
+    _creditLinkHtml = '<div id="credit-link-row" style="margin-bottom:10px;padding:8px 10px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:var(--radius-sm)">'
+      + '<label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Link credit to invoice (optional — if blank, deducts from month total)</label>'
+      + '<select id="credit-linked-inv" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:5px 6px;border-radius:4px">'
+      + '<option value="">— No specific invoice (deduct from month) —</option>'
+      + _invoices.map(function(inv) {
+          var _d = inv.date ? new Date(inv.date + 'T00:00:00') : null;
+          var _ds = _d && !isNaN(_d) ? _d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+          return '<option value="' + escAttr(inv.id) + '">' + escHtml(inv.invoiceNumber || '—') + ' — ' + _ds + ' — ' + fmt(Math.abs(inv.total || 0)) + '</option>';
+        }).join('')
+      + '</select></div>';
+  }
+
+  resultsBody.innerHTML =
+    _creditLinkHtml
+    + '<div id="manual-inv-lines" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>'
+    + '<button class="btn-secondary btn-sm" onclick="_addManualInvLine()" style="margin-bottom:12px">+ Add line item</button>';
+
+  // Add first empty line
+  _addManualInvLine();
+
+  // Show apply button
+  document.getElementById("invoice-apply-btn").classList.remove("hidden");
+  document.getElementById("invoice-apply-btn").textContent = isCredit ? 'Apply Credit Note' : 'Apply Invoice';
+  document.getElementById("invoice-apply-btn").onclick = function() { applyManualInvoice(); };
+}
+
+function _toggleCreditLinkDropdown(suppId) {
+  var isCredit = document.getElementById("inv-credit-note")?.checked || false;
+  var existing = document.getElementById("credit-link-row");
+  if (!isCredit) {
+    if (existing) existing.remove();
+    // Update apply button text if visible
+    var applyBtn = document.getElementById("invoice-apply-btn");
+    if (applyBtn && !applyBtn.classList.contains('hidden')) applyBtn.textContent = 'Apply Price Updates';
+    return;
+  }
+  // Update apply button text
+  var applyBtn = document.getElementById("invoice-apply-btn");
+  if (applyBtn && !applyBtn.classList.contains('hidden')) applyBtn.textContent = 'Apply Credit Note';
+
+  if (existing) return; // already shown
+  if (!suppId) return;
+
+  var _sup = state.suppliers.find(function(s) { return s.id === suppId; });
+  var _invoices = (_sup && _sup.invoiceHistory || []).filter(function(i) { return !i.isCredit && (i.total || 0) > 0; });
+
+  var linkDiv = document.createElement('div');
+  linkDiv.id = 'credit-link-row';
+  linkDiv.style.cssText = 'margin-bottom:10px;padding:8px 10px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:var(--radius-sm)';
+  linkDiv.innerHTML = '<label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Link credit to invoice (optional — if blank, deducts from month total)</label>'
+    + '<select id="credit-linked-inv" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:5px 6px;border-radius:4px">'
+    + '<option value="">— No specific invoice (deduct from month) —</option>'
+    + _invoices.map(function(inv) {
+        var _d = inv.date ? new Date(inv.date + 'T00:00:00') : null;
+        var _ds = _d && !isNaN(_d) ? _d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+        return '<option value="' + escAttr(inv.id) + '">' + escHtml(inv.invoiceNumber || '—') + ' — ' + _ds + ' — ' + fmt(Math.abs(inv.total || 0)) + '</option>';
+      }).join('')
+    + '</select>';
+
+  // Insert at top of results body or before the status line
+  var resultsBody = document.getElementById("invoice-results-body");
+  if (resultsBody) {
+    resultsBody.insertBefore(linkDiv, resultsBody.firstChild);
+  }
+}
+
+var _manualInvLineIdx = 0;
+function _addManualInvLine() {
+  _manualInvLineIdx++;
+  var container = document.getElementById("manual-inv-lines");
+  if (!container) return;
+  var idx = _manualInvLineIdx;
+
+  var _inputStyle = 'background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:5px 6px;border-radius:4px;outline:none';
+
+  var row = document.createElement('div');
+  row.className = 'manual-inv-row';
+  row.id = 'manual-inv-row-' + idx;
+  row.style.cssText = 'display:flex;gap:6px;align-items:center;padding:8px 10px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm)';
+  row.innerHTML =
+    '<div style="flex:2;min-width:0;position:relative">'
+    + '<input type="hidden" id="mil-ing-' + idx + '" value="">'
+    + '<input type="text" id="mil-search-' + idx + '" placeholder="Search ingredient or type new…" autocomplete="off" style="width:100%;box-sizing:border-box;' + _inputStyle + '">'
+    + '<div id="mil-dd-' + idx + '" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border);border-radius:0 0 4px 4px;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,.25)"></div>'
+    + '</div>'
+    + '<input type="number" id="mil-cost-' + idx + '" placeholder="Pack cost" step="0.01" min="0" style="width:80px;' + _inputStyle + '">'
+    + '<input type="number" id="mil-size-' + idx + '" placeholder="Pack size" step="any" min="0" style="width:72px;' + _inputStyle + '">'
+    + '<select id="mil-unit-' + idx + '" style="width:60px;' + _inputStyle + '">'
+    + '<option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option><option value="each">each</option></select>'
+    + '<button onclick="document.getElementById(\'manual-inv-row-' + idx + '\').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px 4px" title="Remove">✕</button>';
+  container.appendChild(row);
+
+  // Wire up searchable dropdown
+  _initIngSearchDropdown(idx);
+}
+
+function _initIngSearchDropdown(idx) {
+  var searchEl = document.getElementById('mil-search-' + idx);
+  var hiddenEl = document.getElementById('mil-ing-' + idx);
+  var ddEl = document.getElementById('mil-dd-' + idx);
+  if (!searchEl || !ddEl) return;
+
+  function renderDropdown(query) {
+    var q = (query || '').toLowerCase();
+    var matches = state.ingredients.filter(function(ing) {
+      return !q || ing.name.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 50);
+    if (!matches.length) {
+      ddEl.innerHTML = '<div style="padding:6px 8px;font-size:11px;color:var(--text-secondary)">No matches — name will be added as new ingredient</div>';
+      ddEl.style.display = 'block';
+      return;
+    }
+    ddEl.innerHTML = matches.map(function(ing) {
+      return '<div class="mil-dd-item" data-id="' + escAttr(ing.id) + '" style="padding:5px 8px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--text-primary)">'
+        + escHtml(ing.name) + ' <span style="color:var(--text-secondary);font-size:10px">(' + ing.packSize + ing.unit + ' — ' + fmt(ing.packCost) + ')</span></div>';
+    }).join('');
+    ddEl.style.display = 'block';
+  }
+
+  searchEl.addEventListener('focus', function() { renderDropdown(searchEl.value); });
+  searchEl.addEventListener('input', function() {
+    hiddenEl.value = ''; // clear selection when user types
+    renderDropdown(searchEl.value);
+  });
+
+  ddEl.addEventListener('mousedown', function(e) {
+    var item = e.target.closest('.mil-dd-item');
+    if (!item) return;
+    e.preventDefault();
+    var ingId = item.dataset.id;
+    var ing = state.ingredients.find(function(i) { return i.id === ingId; });
+    if (ing) {
+      hiddenEl.value = ingId;
+      searchEl.value = ing.name;
+      // Auto-fill pack cost, size, unit
+      var costEl = document.getElementById('mil-cost-' + idx);
+      var sizeEl = document.getElementById('mil-size-' + idx);
+      var unitEl = document.getElementById('mil-unit-' + idx);
+      if (costEl && !costEl.value) costEl.value = ing.packCost || '';
+      if (sizeEl && !sizeEl.value) sizeEl.value = ing.packSize || '';
+      if (unitEl) unitEl.value = ing.unit || 'g';
+    }
+    ddEl.style.display = 'none';
+  });
+
+  searchEl.addEventListener('blur', function() {
+    setTimeout(function() { ddEl.style.display = 'none'; }, 200);
+  });
+}
+
+function applyManualInvoice() {
+  var modal = document.getElementById("invoice-modal");
+  var suppId = modal.dataset.supplierId;
+  var isCredit = document.getElementById("inv-credit-note")?.checked || false;
+  var container = document.getElementById("manual-inv-lines");
+  if (!container) return;
+
+  var rows = container.querySelectorAll('.manual-inv-row');
+  var updated = 0, added = 0;
+  var lines = [];
+  var priceAlerts = [];
+
+  rows.forEach(function(row) {
+    var idx = row.id.replace('manual-inv-row-', '');
+    var ingId = document.getElementById('mil-ing-' + idx)?.value || '';
+    var searchVal = document.getElementById('mil-search-' + idx)?.value.trim() || '';
+    var newName = ingId ? '' : searchVal; // if no ingredient selected, treat search text as new name
+    var packCost = parseFloat(document.getElementById('mil-cost-' + idx)?.value) || 0;
+    var packSize = parseFloat(document.getElementById('mil-size-' + idx)?.value) || 0;
+    var unit = document.getElementById('mil-unit-' + idx)?.value || 'g';
+
+    if (!packCost && !newName && !ingId) return; // skip empty rows
+
+    if (isCredit) packCost = -Math.abs(packCost); // credit notes are negative
+
+    if (ingId) {
+      // Update existing ingredient
+      var ing = state.ingredients.find(function(i) { return i.id === ingId; });
+      if (ing) {
+        if (!ing.altSuppliers) ing.altSuppliers = [];
+        var isDefaultSupplier = !suppId || !ing.supplierId || ing.supplierId === suppId;
+        var absCost = Math.abs(packCost);
+
+        if (isDefaultSupplier && absCost > 0) {
+          // Default supplier → update main ingredient price
+          var oldCost = ing.packCost;
+          ing.packCost = absCost;
+          if (packSize > 0) ing.packSize = packSize;
+          if (!ing.priceHistory) ing.priceHistory = [];
+          ing.priceHistory.push({
+            date: new Date().toISOString(),
+            packCost: oldCost,
+            newCost: absCost,
+            source: isCredit ? 'credit-note' : 'manual-invoice'
+          });
+          if (suppId && !ing.supplierId) ing.supplierId = suppId;
+          if (oldCost > 0) {
+            var pctChange = ((absCost - oldCost) / oldCost) * 100;
+            if (Math.abs(pctChange) >= 3) priceAlerts.push({ ing: ing, pctChange: pctChange, oldCost: oldCost, newCost: absCost });
+          }
+        } else if (!isDefaultSupplier && absCost > 0) {
+          // Different supplier → add/update as alt only, never touch default price
+          var existingAlt = ing.altSuppliers.find(function(a) { return a.supplierId === suppId; });
+          if (existingAlt) {
+            existingAlt.packCost = absCost;
+            if (packSize > 0) existingAlt.packSize = packSize;
+          } else {
+            ing.altSuppliers.push({
+              supplierId: suppId,
+              packSize: packSize || ing.packSize,
+              packCost: absCost,
+            });
+          }
+          if (!ing.priceHistory) ing.priceHistory = [];
+          ing.priceHistory.push({
+            date: new Date().toISOString(),
+            packCost: existingAlt ? existingAlt.packCost : 0,
+            newCost: absCost,
+            source: (isCredit ? 'credit-note' : 'manual-invoice') + ' (alt supplier)'
+          });
+        }
+        updated++;
+        lines.push({ name: ing.name, linkedName: ing.name, packCost: absCost, packSize: ing.packSize, unit: ing.unit, wasMatched: true, wasAdded: false, wasAddedAsAlt: !isDefaultSupplier });
+      }
+    } else if (newName) {
+      // Add as new ingredient
+      var newIng = {
+        id: uid(),
+        name: newName,
+        category: '',
+        packCost: Math.abs(packCost),
+        packSize: packSize || 1,
+        unit: unit,
+        yieldPct: 100,
+        allergens: [],
+        priceHistory: [],
+        altSuppliers: [],
+        supplierId: suppId || null,
+      };
+      state.ingredients.push(newIng);
+      added++;
+      lines.push({ name: newName, linkedName: newName, packCost: Math.abs(packCost), packSize: newIng.packSize, unit: unit, wasMatched: false, wasAdded: true, wasAddedAsAlt: false });
+    }
+  });
+
+  if (!updated && !added) { showToast('No items to apply', 'error', 2000); return; }
+
+  // Save invoice record
+  if (suppId) {
+    var sup = state.suppliers.find(function(s) { return s.id === suppId; });
+    if (sup) {
+      if (!sup.invoiceHistory) sup.invoiceHistory = [];
+      var invNum = document.getElementById('inv-number').value.trim();
+      var invDate = document.getElementById('inv-date').value.trim();
+      var invTotal = parseFloat(document.getElementById('inv-total').value) || 0;
+      if (isCredit && invTotal > 0) invTotal = -invTotal;
+
+      // Credit note linkage
+      var linkedInvId = '';
+      if (isCredit) {
+        var linkEl = document.getElementById('credit-linked-inv');
+        linkedInvId = linkEl ? linkEl.value : '';
+        // If linked to a specific invoice, deduct from that invoice's recorded total
+        if (linkedInvId) {
+          var linkedInv = sup.invoiceHistory.find(function(i) { return i.id === linkedInvId; });
+          if (linkedInv) {
+            linkedInv.creditApplied = (linkedInv.creditApplied || 0) + Math.abs(invTotal);
+          }
+        }
+      }
+
+      sup.invoiceHistory.unshift({
+        id: uid(),
+        invoiceNumber: (isCredit ? 'CR: ' : '') + (invNum || '—'),
+        date: invDate || new Date().toISOString().slice(0, 10),
+        total: invTotal,
+        itemCount: lines.length,
+        updatedCount: updated,
+        addedCount: added,
+        fileName: isCredit ? 'Credit Note (manual)' : 'Manual entry',
+        scannedAt: new Date().toISOString(),
+        isCredit: isCredit,
+        linkedInvoiceId: linkedInvId || null,
+        lines: lines,
+      });
+    }
+  }
+
+  save();
+  invalidateMaps();
+  document.getElementById("invoice-modal").classList.add("hidden");
+  if (state.activeRecipeId) renderRecipeEditor();
+  renderIngredientLibrary();
+  if (suppId) renderSupplierList();
+
+  var msg = isCredit
+    ? '✓ Credit note applied: ' + updated + ' updated, ' + added + ' added'
+    : '✓ Manual invoice applied: ' + updated + ' updated, ' + added + ' added';
+  showToast(msg, 'success', 3000);
+
+  if (priceAlerts.length) {
+    checkBulkPriceImpact(priceAlerts.map(function(a) { return { ing: a.ing, oldCost: a.oldCost, newCost: a.newCost }; }));
+  }
 }
 
 function updateInvoiceModelUI() {
@@ -12932,7 +13350,7 @@ function renderInvoiceResults() {
               : ' &nbsp;<span style="color:var(--green);font-weight:600">▼ -' + Math.abs(_pricePct).toFixed(1) + '% vs last</span>';
           }
           supplierBadge =
-            '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Primary supplier' + priceNote + '</div>';
+            '<div style="font-size:10px;color:var(--green);margin-top:3px">✓ Default supplier — will update price' + priceNote + '</div>';
         } else {
           const _alreadyAlt = (ing.altSuppliers || []).some(function (a) {
             return a.supplierId === invSuppId;
@@ -12970,14 +13388,14 @@ function renderInvoiceResults() {
 
           if (_alreadyAlt) {
             supplierBadge =
-              '<div style="font-size:10px;color:var(--accent);margin-top:3px">Will update alt. supplier pricing' +
+              '<div style="font-size:10px;color:var(--accent);margin-top:3px">Alt. supplier — default price unchanged' +
               priceCompNote +
               '</div>' + _setPrimaryChk;
           } else {
             supplierBadge =
-              '<div style="font-size:10px;color:var(--accent);margin-top:3px">Will add as alt. supplier (primary: ' +
+              '<div style="font-size:10px;color:var(--accent);margin-top:3px">New alt. supplier (default: ' +
               escHtml(_otherSupName) +
-              ')' + priceCompNote + '</div>' + _setPrimaryChk;
+              ' — price unchanged)' + priceCompNote + '</div>' + _setPrimaryChk;
           }
         }
       }
@@ -13164,6 +13582,7 @@ function applyInvoiceUpdates() {
     added = 0;
   const supplierId =
     document.getElementById("invoice-modal").dataset.supplierId || null;
+  const isCredit = document.getElementById("inv-credit-note")?.checked || false;
 
   const priceAlerts = []; // track rises for summary
   const cheaperAltCandidates = []; // track newly-added alts that are cheaper than primary
@@ -13174,81 +13593,98 @@ function applyInvoiceUpdates() {
         return i.id === item.matchedId;
       });
       if (ing) {
-        const oldCost = ing.packCost;
         const newCost = item.packCost;
-        logPriceChange(ing, oldCost, newCost);
-        // Detect price change
-        if (oldCost > 0 && newCost > 0 && newCost !== oldCost) {
-          const pctChange = ((newCost - oldCost) / oldCost) * 100;
-          priceAlerts.push({
-            name: ing.name,
-            oldCost,
-            newCost,
-            pctChange,
-            oldPackSize: ing.packSize,
-            newPackSize: item.packSize || ing.packSize,
-            unit: ing.unit,
-          });
-        }
-        ing.packCost = newCost;
-        if (item.packSize) ing.packSize = item.packSize;
-        // Link supplier: set as primary if none, add as alt if different primary, or
-        // promote to primary if user checked "Set as primary" (Feature 1)
-        if (supplierId) {
-          if (!ing.supplierId) {
-            // No supplier yet — claim this one as primary
-            ing.supplierId = supplierId;
-          } else if (ing.supplierId !== supplierId) {
-            if (item.setAsPrimary) {
-              // User chose to promote this invoice supplier to primary
-              const _oldPrimary = {
-                supplierId: ing.supplierId,
-                packSize: ing.packSize,
-                packCost: ing.packCost,
-              };
-              ing.supplierId = supplierId;
-              // packCost/packSize already set above
-              if (!ing.altSuppliers) ing.altSuppliers = [];
-              // Remove this supplier from alts if it was there
-              ing.altSuppliers = ing.altSuppliers.filter(function (a) {
-                return a.supplierId !== supplierId;
-              });
-              // Demote old primary to alt
-              if (_oldPrimary.packCost && _oldPrimary.packSize) {
-                ing.altSuppliers.push(_oldPrimary);
-              }
-            } else {
-              // Different primary supplier — add invoice supplier to altSuppliers
-              if (!ing.altSuppliers) ing.altSuppliers = [];
-              const _existingAlt = ing.altSuppliers.find(function (a) {
-                return a.supplierId === supplierId;
-              });
-              if (_existingAlt) {
-                // Already an alt — just update its pricing
-                _existingAlt.packCost = newCost;
-                if (item.packSize) _existingAlt.packSize = item.packSize;
-              } else {
-                // New alt supplier
-                ing.altSuppliers.push({
-                  supplierId: supplierId,
-                  packSize: item.packSize || ing.packSize,
-                  packCost: newCost,
-                });
-              }
-            }
-          }
-          // If ing.supplierId === supplierId → already primary, price was updated above
+        const newPackSize = item.packSize || ing.packSize;
+        if (!ing.altSuppliers) ing.altSuppliers = [];
 
-          // Feature 4: detect when the newly-added alt is cheaper per unit than primary
-          if (
-            supplierId &&
-            ing.supplierId !== supplierId &&
-            !item.setAsPrimary &&
-            ing.packSize > 0 && ing.packCost > 0 &&
-            item.packCost > 0
-          ) {
-            const _altPackSize = item.packSize || ing.packSize;
-            const _altCpu = _altPackSize > 0 ? item.packCost / _altPackSize : 0;
+        // Determine relationship: is scanned supplier the default?
+        const isDefaultSupplier = !supplierId || !ing.supplierId || ing.supplierId === supplierId;
+
+        if (isDefaultSupplier) {
+          // ── Default supplier → update main ingredient price ──
+          const oldCost = ing.packCost;
+          logPriceChange(ing, oldCost, newCost);
+          if (oldCost > 0 && newCost > 0 && newCost !== oldCost) {
+            const pctChange = ((newCost - oldCost) / oldCost) * 100;
+            priceAlerts.push({
+              name: ing.name,
+              oldCost,
+              newCost,
+              pctChange,
+              oldPackSize: ing.packSize,
+              newPackSize: newPackSize,
+              unit: ing.unit,
+            });
+          }
+          ing.packCost = newCost;
+          if (item.packSize) ing.packSize = item.packSize;
+          if (supplierId && !ing.supplierId) ing.supplierId = supplierId;
+        } else if (item.setAsPrimary) {
+          // ── User explicitly chose to promote this supplier to primary ──
+          const _oldPrimary = {
+            supplierId: ing.supplierId,
+            packSize: ing.packSize,
+            packCost: ing.packCost,
+          };
+          const oldCost = ing.packCost;
+          // Remove this supplier from alts if it was there
+          ing.altSuppliers = ing.altSuppliers.filter(function (a) {
+            return a.supplierId !== supplierId;
+          });
+          // Demote old primary to alt
+          if (_oldPrimary.packCost && _oldPrimary.packSize) {
+            ing.altSuppliers.push(_oldPrimary);
+          }
+          ing.supplierId = supplierId;
+          ing.packCost = newCost;
+          if (item.packSize) ing.packSize = item.packSize;
+          logPriceChange(ing, oldCost, newCost);
+          if (oldCost > 0 && newCost > 0 && newCost !== oldCost) {
+            priceAlerts.push({
+              name: ing.name,
+              oldCost,
+              newCost,
+              pctChange: ((newCost - oldCost) / oldCost) * 100,
+              oldPackSize: _oldPrimary.packSize,
+              newPackSize: newPackSize,
+              unit: ing.unit,
+            });
+          }
+        } else {
+          // ── Different supplier → add/update as alt only, never touch default price ──
+          const _existingAlt = ing.altSuppliers.find(function (a) {
+            return a.supplierId === supplierId;
+          });
+          if (_existingAlt) {
+            // Log alt price change for reporting
+            var _oldAltCost = _existingAlt.packCost;
+            _existingAlt.packCost = newCost;
+            if (item.packSize) _existingAlt.packSize = item.packSize;
+            if (_oldAltCost > 0 && newCost > 0 && newCost !== _oldAltCost) {
+              var _altSup = state.suppliers.find(function(s) { return s.id === supplierId; });
+              priceAlerts.push({
+                name: ing.name + ' (' + (_altSup ? _altSup.name : 'alt') + ')',
+                oldCost: _oldAltCost,
+                newCost: newCost,
+                pctChange: (((newCost - _oldAltCost) / _oldAltCost) * 100),
+                oldPackSize: _existingAlt.packSize,
+                newPackSize: newPackSize,
+                unit: ing.unit,
+              });
+            }
+          } else {
+            // New alt supplier entry
+            ing.altSuppliers.push({
+              supplierId: supplierId,
+              packSize: newPackSize,
+              packCost: newCost,
+            });
+          }
+
+          // Detect if this alt is cheaper than the current default
+          if (ing.packSize > 0 && ing.packCost > 0 && newCost > 0) {
+            const _altPS = item.packSize || ing.packSize;
+            const _altCpu = _altPS > 0 ? newCost / _altPS : 0;
             const _primCpu = ing.packCost / ing.packSize;
             if (_altCpu > 0 && _altCpu < _primCpu) {
               const _primSup = state.suppliers.find(function (s) {
@@ -13317,13 +13753,29 @@ function applyInvoiceUpdates() {
         !isNaN(new Date(_rawInvDate))
           ? _rawInvDate
           : new Date().toISOString().slice(0, 10);
-      const _cleanTotal =
-        parseFloat(_rawInvTot) || parseFloat(modal.dataset.invoiceTotal) || 0;
+      var _parsedTotal = parseFloat(_rawInvTot) || parseFloat(modal.dataset.invoiceTotal) || 0;
+      const _cleanTotal = isCredit && _parsedTotal > 0 ? -_parsedTotal : _parsedTotal;
+
+      // Credit note linkage (AI scan path)
+      var _linkedInvId = '';
+      if (isCredit) {
+        var _linkEl = document.getElementById('credit-linked-inv');
+        _linkedInvId = _linkEl ? _linkEl.value : '';
+        if (_linkedInvId) {
+          var _linkedInv = sup.invoiceHistory.find(function(i) { return i.id === _linkedInvId; });
+          if (_linkedInv) {
+            _linkedInv.creditApplied = (_linkedInv.creditApplied || 0) + Math.abs(_cleanTotal);
+          }
+        }
+      }
+
       sup.invoiceHistory.unshift({
         id: uid(),
-        invoiceNumber: _cleanNum,
+        invoiceNumber: (isCredit ? 'CR: ' : '') + _cleanNum,
         date: _cleanDate,
         total: _cleanTotal,
+        isCredit: isCredit,
+        linkedInvoiceId: _linkedInvId || null,
         itemCount: invoiceResults.length,
         updatedCount: updated,
         addedCount: added,
@@ -13421,7 +13873,7 @@ function applyInvoiceUpdates() {
         " detected",
     );
   showToast(
-    "✓ " + (parts.join(" · ") || "No changes"),
+    (isCredit ? "✓ Credit note applied: " : "✓ ") + (parts.join(" · ") || "No changes"),
     priceAlerts.some(function (a) {
       return a.pctChange > 0;
     })
@@ -14291,7 +14743,9 @@ function renderMenuPrintPreview() {
   const showPrices = document.getElementById("mp-show-prices")?.checked !== false;
   const showGP = document.getElementById("mp-show-gp")?.checked === true;
   const groupByCat = document.getElementById("mp-group-cat")?.checked !== false;
+  const showAllergens = document.getElementById("mp-show-allergens")?.checked !== false;
   const cur = state.currency || "£";
+  const vatRate = state.vatRate || 0;
 
   const recipes = _mpFilteredRecipes();
 
@@ -14321,13 +14775,15 @@ function renderMenuPrintPreview() {
 
   function recipeCard(r) {
     const tags = menuDietaryTags(r);
+    const allergens = recipeAllergens(r);
     const cpp = recipeTotalCost(r) / (r.portions || 1);
-    const price =
+    const priceExVat =
       r.priceOverride ||
       (cpp > 0 ? suggestPrice(cpp, state.activeGP || 70) : 0);
+    const priceIncVat = vatRate > 0 ? priceExVat * (1 + vatRate / 100) : priceExVat;
     const gp =
-      price > 0
-        ? (((price - cpp) / price) * 100).toFixed(1)
+      priceExVat > 0
+        ? (((priceExVat - cpp) / priceExVat) * 100).toFixed(1)
         : null;
 
     const tagsHtml = tags
@@ -14340,6 +14796,11 @@ function renderMenuPrintPreview() {
       })
       .join("");
 
+    const allergensHtml = showAllergens && allergens.length
+      ? `<div style="font-size:10px;color:var(--red);margin-top:3px;line-height:1.4">` +
+        `<span style="font-weight:700">Allergens:</span> ${escHtml(allergens.join(', '))}</div>`
+      : "";
+
     const notesHtml = r.notes
       ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.5;` +
         `overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-style:italic">` +
@@ -14348,8 +14809,8 @@ function renderMenuPrintPreview() {
       : "";
 
     const priceHtml =
-      showPrices && price > 0
-        ? `<div style="font-size:16px;font-weight:800;color:var(--accent);white-space:nowrap">${cur}${price.toFixed(2)}</div>`
+      showPrices && priceIncVat > 0
+        ? `<div style="font-size:16px;font-weight:800;color:var(--accent);white-space:nowrap">${cur}${priceIncVat.toFixed(2)}</div>`
         : "";
     const gpHtml =
       showGP && gp
@@ -14366,6 +14827,7 @@ function renderMenuPrintPreview() {
       (tags.length
         ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:1px">${tagsHtml}</div>`
         : "") +
+      allergensHtml +
       `</div>`
     );
   }
@@ -14433,9 +14895,11 @@ async function printMenuCard() {
   const showPrices = document.getElementById("mp-show-prices")?.checked !== false;
   const showGP = document.getElementById("mp-show-gp")?.checked === true;
   const groupByCat = document.getElementById("mp-group-cat")?.checked !== false;
+  const showAllergens = document.getElementById("mp-show-allergens")?.checked !== false;
   const menuTitle =
     (document.getElementById("mp-menu-title")?.value || "").trim() || "Our Menu";
   const cur = state.currency || "£";
+  const vatRate = state.vatRate || 0;
 
   const recipes = _mpFilteredRecipes();
   if (!recipes.length) {
@@ -14460,13 +14924,15 @@ async function printMenuCard() {
 
   function buildDish(r) {
     const tags = menuDietaryTags(r);
+    const allergens = recipeAllergens(r);
     const cpp = recipeTotalCost(r) / (r.portions || 1);
-    const price =
+    const priceExVat =
       r.priceOverride ||
       (cpp > 0 ? suggestPrice(cpp, state.activeGP || 70) : 0);
+    const priceIncVat = vatRate > 0 ? priceExVat * (1 + vatRate / 100) : priceExVat;
     const gp =
-      price > 0
-        ? (((price - cpp) / price) * 100).toFixed(1)
+      priceExVat > 0
+        ? (((priceExVat - cpp) / priceExVat) * 100).toFixed(1)
         : null;
 
     const badgesHtml = tags
@@ -14477,12 +14943,16 @@ async function printMenuCard() {
       )
       .join("");
 
+    const allergensLine = showAllergens && allergens.length
+      ? `<div style="font-size:9px;color:#c00;margin-top:2px"><b>Allergens:</b> ${escHtml(allergens.join(', '))}</div>`
+      : "";
+
     return (
       `<div class="dish">` +
       `<div class="dish-header">` +
       `<div class="dish-name">${escHtml(r.name)}</div>` +
-      (showPrices && price > 0
-        ? `<div class="dish-price">${cur}${price.toFixed(2)}</div>`
+      (showPrices && priceIncVat > 0
+        ? `<div class="dish-price">${cur}${priceIncVat.toFixed(2)}</div>`
         : "") +
       `</div>` +
       (r.notes
@@ -14494,6 +14964,7 @@ async function printMenuCard() {
           (showGP && gp ? `<div class="dish-gp">GP ${gp}%</div>` : "") +
           `</div>`
         : "") +
+      allergensLine +
       `</div>`
     );
   }
@@ -15797,6 +16268,229 @@ async function printRecipeCard(id) {
     w.document.write(html);
     w.document.close();
   } else showToast("Allow popups to print", "error", 3000);
+}
+
+// ─── Allergen QR Cards ───────────────────────────────────────────
+function _buildAllergenPageHtml(recipe) {
+  const allergens = recipeAllergens(recipe);
+  const dietTags = menuDietaryTags(recipe);
+  const nutrition = recipeNutritionTotal(recipe);
+  const cur = state.currency || '£';
+  const portions = recipe.portions || 1;
+  const cpp = recipeTotalCost(recipe) / portions;
+  const sellPrice = recipe.priceOverride || suggestPrice(cpp, state.activeGP);
+  const vatRate = state.vatRate || 0;
+  const inclPrice = vatRate > 0 ? sellPrice * (1 + vatRate / 100) : sellPrice;
+
+  const dietFullNames = {
+    'GF': 'Gluten Free', 'NF': 'Nut Free', 'DF': 'Dairy Free',
+    'EF': 'Egg Free', 'SF': 'Shellfish Free'
+  };
+  const dietColors = {
+    'GF': '#059669', 'NF': '#8b5cf6', 'DF': '#2563eb',
+    'EF': '#d97706', 'SF': '#0891b2'
+  };
+
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<title>' + escHtml(recipe.name) + ' — Allergen Info</title>'
+    + '<style>'
+    + '*{box-sizing:border-box;margin:0;padding:0}'
+    + 'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f8f9fa;color:#1a1a2e;min-height:100vh;display:flex;justify-content:center;padding:20px}'
+    + '.card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:420px;width:100%;overflow:hidden}'
+    + '.header{background:#1a1a2e;color:#fff;padding:24px 20px;text-align:center}'
+    + '.header h1{font-size:22px;font-weight:800;margin-bottom:4px}'
+    + '.header .cat{font-size:12px;opacity:.7;text-transform:uppercase;letter-spacing:1px}'
+    + '.price{text-align:center;padding:12px;background:#f0f0f5;font-size:18px;font-weight:800;color:#1a1a2e}'
+    + '.section{padding:16px 20px}'
+    + '.section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#999;margin-bottom:10px}'
+    + '.diet-tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}'
+    + '.diet-tag{padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;color:#fff}'
+    + '.allergen-list{display:flex;flex-direction:column;gap:6px}'
+    + '.allergen-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff8f0;border:1px solid #ffe0b2;border-radius:8px;font-size:13px;font-weight:600;color:#c85a00}'
+    + '.allergen-item .icon{font-size:16px}'
+    + '.safe{background:#f0fdf4;border-color:#bbf7d0;color:#166534}'
+    + '.nut-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;text-align:center}'
+    + '.nut-cell{padding:10px 4px;border-right:1px solid #e5e7eb}'
+    + '.nut-cell:last-child{border-right:none}'
+    + '.nut-val{font-size:16px;font-weight:800;color:#1a1a2e}'
+    + '.nut-lbl{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#999;margin-top:2px}'
+    + '.footer{text-align:center;padding:12px 20px;font-size:10px;color:#ccc;border-top:1px solid #f0f0f0}'
+    + '</style></head><body><div class="card">'
+    + '<div class="header"><h1>' + escHtml(recipe.name) + '</h1>'
+    + '<div class="cat">' + escHtml(recipe.category || '') + '</div></div>'
+    + (vatRate > 0 ? '<div class="price">' + cur + inclPrice.toFixed(2) + ' <span style="font-size:12px;font-weight:400;color:#888">inc. VAT</span></div>' : '')
+    + '<div class="section">'
+    + '<div class="section-title">Dietary Information</div>'
+    + '<div class="diet-tags">'
+    + dietTags.map(function(t) { return '<span class="diet-tag" style="background:' + (dietColors[t] || '#666') + '">' + t + ' — ' + (dietFullNames[t] || t) + '</span>'; }).join('')
+    + '</div></div>'
+    + '<div class="section" style="padding-top:0">'
+    + '<div class="section-title">Allergens' + (allergens.length ? ' (' + allergens.length + ' present)' : '') + '</div>'
+    + (allergens.length
+      ? '<div class="allergen-list">' + allergens.map(function(a) {
+          return '<div class="allergen-item"><span class="icon">⚠️</span>' + escHtml(a) + '</div>';
+        }).join('') + '</div>'
+      : '<div class="allergen-item safe"><span class="icon">✅</span>No allergens declared</div>')
+    + '</div>'
+    + (nutrition && nutrition.kcal
+      ? '<div class="section" style="padding-top:0"><div class="section-title">Nutrition per Portion</div>'
+        + '<div class="nut-grid">'
+        + '<div class="nut-cell"><div class="nut-val">' + Math.round(nutrition.kcal) + '</div><div class="nut-lbl">Calories</div></div>'
+        + '<div class="nut-cell"><div class="nut-val">' + nutrition.protein.toFixed(1) + 'g</div><div class="nut-lbl">Protein</div></div>'
+        + '<div class="nut-cell"><div class="nut-val">' + nutrition.fat.toFixed(1) + 'g</div><div class="nut-lbl">Fat</div></div>'
+        + '<div class="nut-cell"><div class="nut-val">' + nutrition.carbs.toFixed(1) + 'g</div><div class="nut-lbl">Carbs</div></div>'
+        + '</div></div>'
+      : '')
+    + '<div class="footer">Please inform staff of any allergies before ordering</div>'
+    + '</div></body></html>';
+}
+
+async function printAllergenQRCard(id) {
+  const recipe = state.recipes.find(function(r) { return r.id === id; });
+  if (!recipe) return;
+
+  const allergens = recipeAllergens(recipe);
+  const dietTags = menuDietaryTags(recipe);
+  const nutrition = recipeNutritionTotal(recipe);
+
+  // Build the data the QR encodes: a compact customer-facing page as data URI
+  var pageHtml = _buildAllergenPageHtml(recipe);
+  var dataUri = 'data:text/html;charset=utf-8,' + encodeURIComponent(pageHtml);
+
+  // If the data URI is too large for QR (max ~4296 alphanumeric chars), fall back to text-only
+  var qrContent, qrIsUrl = true;
+  if (dataUri.length > 2800) {
+    // Text fallback — compact allergen summary
+    qrContent = recipe.name + '\n'
+      + (recipe.category ? recipe.category + '\n' : '')
+      + '\nALLERGENS: ' + (allergens.length ? allergens.join(', ') : 'None declared')
+      + '\nDIETARY: ' + (dietTags.length ? dietTags.join(', ') : 'N/A')
+      + (nutrition && nutrition.kcal ? '\nNUTRITION/PORTION: ' + Math.round(nutrition.kcal) + 'kcal | ' + nutrition.protein.toFixed(1) + 'g protein | ' + nutrition.fat.toFixed(1) + 'g fat | ' + nutrition.carbs.toFixed(1) + 'g carbs' : '')
+      + '\n\nPlease inform staff of any allergies.';
+    qrIsUrl = false;
+  } else {
+    qrContent = dataUri;
+  }
+
+  var qrDataUrl;
+  try {
+    qrDataUrl = await window.electronAPI.generateQR(qrContent, { width: 300, margin: 2 });
+  } catch(e) {
+    showToast('QR generation failed: ' + e.message, 'error', 3000);
+    return;
+  }
+
+  var dietFullNames = { 'GF': 'Gluten Free', 'NF': 'Nut Free', 'DF': 'Dairy Free', 'EF': 'Egg Free', 'SF': 'Shellfish Free' };
+  var dietColors = { 'GF': '#059669', 'NF': '#8b5cf6', 'DF': '#2563eb', 'EF': '#d97706', 'SF': '#0891b2' };
+
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
+    + '*{box-sizing:border-box;margin:0;padding:0}'
+    + 'body{font-family:"Segoe UI",Arial,sans-serif;background:#fff;color:#1a1a2e}'
+    + '.card{width:320px;margin:20px auto;border:2px solid #1a1a2e;border-radius:12px;overflow:hidden;page-break-inside:avoid}'
+    + '.card-header{background:#1a1a2e;color:#fff;padding:14px 16px;text-align:center}'
+    + '.card-header h2{font-size:18px;font-weight:800;margin-bottom:2px}'
+    + '.card-header .cat{font-size:10px;opacity:.7;text-transform:uppercase;letter-spacing:1.5px}'
+    + '.card-body{padding:14px 16px;text-align:center}'
+    + '.qr-img{width:180px;height:180px;margin:0 auto 10px}'
+    + '.scan-hint{font-size:10px;color:#999;margin-bottom:12px}'
+    + '.diet-row{display:flex;justify-content:center;gap:4px;flex-wrap:wrap;margin-bottom:10px}'
+    + '.diet-pill{padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;color:#fff}'
+    + '.allergen-box{background:#fff8f0;border:1px solid #ffe0b2;border-radius:6px;padding:8px 10px;text-align:left;font-size:11px}'
+    + '.allergen-box b{color:#c85a00}'
+    + '.safe-box{background:#f0fdf4;border-color:#bbf7d0;color:#166534}'
+    + '.card-footer{text-align:center;padding:8px 16px;border-top:1px solid #f0f0f0;font-size:9px;color:#bbb}'
+    + '@media print{body{margin:0} .card{border:2px solid #1a1a2e;margin:10px auto}}'
+    + '</style></head><body>'
+    + '<div class="card">'
+    + '<div class="card-header"><h2>' + escHtml(recipe.name) + '</h2>'
+    + '<div class="cat">' + escHtml(recipe.category || '') + '</div></div>'
+    + '<div class="card-body">'
+    + '<img class="qr-img" src="' + qrDataUrl + '" alt="QR Code">'
+    + '<div class="scan-hint">' + (qrIsUrl ? 'Scan for full allergen &amp; nutrition info' : 'Scan for allergen info') + '</div>'
+    + '<div class="diet-row">'
+    + dietTags.map(function(t) { return '<span class="diet-pill" style="background:' + (dietColors[t] || '#666') + '">' + t + '</span>'; }).join('')
+    + '</div>'
+    + (allergens.length
+      ? '<div class="allergen-box"><b>⚠ Allergens:</b> ' + allergens.join(', ') + '</div>'
+      : '<div class="allergen-box safe-box">✅ No allergens declared</div>')
+    + '</div>'
+    + '<div class="card-footer">Please inform staff of any allergies before ordering</div>'
+    + '</div>'
+    + '<script>window.onload=function(){window.print()}<\/script>'
+    + '</body></html>';
+
+  browserIPC.exportPDF(html);
+}
+
+async function printBatchAllergenQR() {
+  var sellable = state.recipes.filter(function(r) { return !r.yieldQty; });
+  if (!sellable.length) { showToast('No recipes to export', 'error'); return; }
+
+  showToast('Generating QR codes for ' + sellable.length + ' recipes…', 'info', 3000);
+
+  var dietFullNames = { 'GF': 'Gluten Free', 'NF': 'Nut Free', 'DF': 'Dairy Free', 'EF': 'Egg Free', 'SF': 'Shellfish Free' };
+  var dietColors = { 'GF': '#059669', 'NF': '#8b5cf6', 'DF': '#2563eb', 'EF': '#d97706', 'SF': '#0891b2' };
+
+  var cards = '';
+  for (var i = 0; i < sellable.length; i++) {
+    var recipe = sellable[i];
+    var allergens = recipeAllergens(recipe);
+    var dietTags = menuDietaryTags(recipe);
+    var nutrition = recipeNutritionTotal(recipe);
+
+    // QR content — text summary (batch mode always uses text for speed/size)
+    var qrContent = recipe.name + '\n'
+      + (recipe.category ? recipe.category + '\n' : '')
+      + '\nALLERGENS: ' + (allergens.length ? allergens.join(', ') : 'None declared')
+      + '\nDIETARY: ' + (dietTags.length ? dietTags.join(', ') : 'N/A')
+      + (nutrition && nutrition.kcal ? '\nNUTRITION: ' + Math.round(nutrition.kcal) + 'kcal | P:' + nutrition.protein.toFixed(1) + 'g | F:' + nutrition.fat.toFixed(1) + 'g | C:' + nutrition.carbs.toFixed(1) + 'g' : '')
+      + '\n\nPlease inform staff of any allergies.';
+
+    var qrDataUrl;
+    try {
+      qrDataUrl = await window.electronAPI.generateQR(qrContent, { width: 240, margin: 1 });
+    } catch(e) { continue; }
+
+    cards += '<div class="card">'
+      + '<div class="card-header"><h3>' + escHtml(recipe.name) + '</h3>'
+      + '<div class="cat">' + escHtml(recipe.category || '') + '</div></div>'
+      + '<div class="card-body">'
+      + '<img class="qr-img" src="' + qrDataUrl + '">'
+      + '<div class="scan-hint">Scan for allergen info</div>'
+      + '<div class="diet-row">'
+      + dietTags.map(function(t) { return '<span class="diet-pill" style="background:' + (dietColors[t] || '#666') + '">' + t + '</span>'; }).join('')
+      + '</div>'
+      + (allergens.length
+        ? '<div class="allergen-box"><b>⚠</b> ' + allergens.join(', ') + '</div>'
+        : '<div class="allergen-box safe-box">✅ No allergens</div>')
+      + '</div></div>';
+  }
+
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
+    + '*{box-sizing:border-box;margin:0;padding:0}'
+    + 'body{font-family:"Segoe UI",Arial,sans-serif;background:#fff;color:#1a1a2e;padding:10px}'
+    + '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}'
+    + '.card{border:1.5px solid #1a1a2e;border-radius:10px;overflow:hidden;page-break-inside:avoid}'
+    + '.card-header{background:#1a1a2e;color:#fff;padding:10px 12px;text-align:center}'
+    + '.card-header h3{font-size:13px;font-weight:800;margin-bottom:1px}'
+    + '.card-header .cat{font-size:9px;opacity:.7;text-transform:uppercase;letter-spacing:1px}'
+    + '.card-body{padding:10px 12px;text-align:center}'
+    + '.qr-img{width:120px;height:120px;margin:0 auto 6px;display:block}'
+    + '.scan-hint{font-size:9px;color:#999;margin-bottom:8px}'
+    + '.diet-row{display:flex;justify-content:center;gap:3px;flex-wrap:wrap;margin-bottom:6px}'
+    + '.diet-pill{padding:2px 6px;border-radius:10px;font-size:9px;font-weight:700;color:#fff}'
+    + '.allergen-box{font-size:10px;background:#fff8f0;border:1px solid #ffe0b2;border-radius:4px;padding:5px 8px;text-align:left}'
+    + '.allergen-box b{color:#c85a00}'
+    + '.safe-box{background:#f0fdf4;border-color:#bbf7d0;color:#166534}'
+    + '@media print{body{padding:5mm} .grid{gap:8px} .card{break-inside:avoid}}'
+    + '</style></head><body>'
+    + '<div style="text-align:center;margin-bottom:14px"><h1 style="font-size:18px;font-weight:900">Allergen QR Cards</h1>'
+    + '<div style="font-size:11px;color:#888">' + sellable.length + ' recipes · ' + new Date().toLocaleDateString('en-GB') + '</div></div>'
+    + '<div class="grid">' + cards + '</div>'
+    + '<script>window.onload=function(){window.print()}<\/script>'
+    + '</body></html>';
+
+  browserIPC.exportPDF(html);
 }
 
 // ─── Recipe Tags ──────────────────────────────────────────────
@@ -17617,6 +18311,15 @@ function renderToolsView() {
           : "All on best price",
         _supSavings > 0 ? "var(--accent)" : "var(--green)",
         "openSupplierSavingsPanel()",
+      ) +
+      toolCard(
+        "📱",
+        "Allergen QR Cards",
+        "Generate printable QR code cards for each recipe — customers scan to see allergens, dietary info & nutrition",
+        totalRecipes,
+        "recipe" + (totalRecipes !== 1 ? "s" : "") + " ready",
+        "var(--accent)",
+        "printBatchAllergenQR()",
       );
   }
 

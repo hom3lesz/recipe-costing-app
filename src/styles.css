@@ -2978,6 +2978,9 @@ input[type=range].gp-slider {
 .rl-row-actions { display: inline-flex; gap: 2px; align-items: center; opacity: 0; transition: opacity .15s; }
 .rl-row:hover .rl-row-actions { opacity: 1; }
 
+/* ── Recipe gallery cards ── */
+.rg-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,.15); }
+
 /* ── Recipe list group header collapsible ── */
 .rl-grp-hdr:hover td { background: var(--bg-hover); }
 .rl-grp-arrow { font-size: 9px; color: var(--text-muted); display: inline-block; transition: transform .15s; margin-right: 2px; }
