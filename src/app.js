@@ -1921,6 +1921,8 @@ function debouncedSave() {
 
 async function save() {
   clearTimeout(_saveTimer); // cancel any pending debounced save — this one wins
+  // Stamp global edit timestamp for sync conflict detection
+  state._lastEditTimestamp = new Date().toISOString();
   // Stamp lastEdited on the active recipe whenever save is called
   if (state.activeRecipeId) {
     const ar = state.recipes.find((r) => r.id === state.activeRecipeId);
@@ -1984,7 +1986,9 @@ function _autoSyncToCloud() {
         recipeCategories: state.recipeCategories
       },
       exportDate: new Date().toISOString(),
-      version: state.version || '0.0.12'
+      version: state.version || '0.0.12',
+      deviceName: _getDeviceName(),
+      dataTimestamp: state._lastEditTimestamp || new Date().toISOString()
     };
     window.electronAPI.syncBackupToFolder(s.folder, data).then(function(res) {
       if (res && !res.error) {
@@ -12223,6 +12227,11 @@ function _saveSyncSettings(s) {
   localStorage.setItem('cloudSyncSettings', JSON.stringify(s));
 }
 
+function _getDeviceName() {
+  var s = _getSyncSettings();
+  return s.deviceName || 'This PC';
+}
+
 async function chooseSyncFolder() {
   const folder = await window.electronAPI.chooseSyncFolder();
   if (!folder) return;
@@ -12231,6 +12240,15 @@ async function chooseSyncFolder() {
   _saveSyncSettings(s);
   _renderSyncUI();
   showToast('Sync folder set: ' + folder, 'success', 3000);
+}
+
+function saveDeviceName() {
+  var el = document.getElementById('sync-device-name');
+  if (!el) return;
+  var s = _getSyncSettings();
+  s.deviceName = el.value.trim() || 'This PC';
+  _saveSyncSettings(s);
+  showToast('Device name saved: ' + s.deviceName, 'success', 2000);
 }
 
 function clearSyncFolder() {
@@ -12273,7 +12291,9 @@ async function runSyncNow() {
         recipeCategories: state.recipeCategories
       },
       exportDate: new Date().toISOString(),
-      version: state.version || '0.0.12'
+      version: state.version || '0.0.12',
+      deviceName: _getDeviceName(),
+      dataTimestamp: state._lastEditTimestamp || new Date().toISOString()
     };
     const result = await window.electronAPI.syncBackupToFolder(s.folder, data);
     if (result.error) {
@@ -12339,6 +12359,163 @@ async function _renderSyncUI() {
     pathEl.textContent = 'No folder selected';
     if (controlsEl) controlsEl.style.display = 'none';
     if (openBtn) openBtn.style.display = 'none';
+  }
+}
+
+// ─── Startup Sync Check ─────────────────────────────────────────────────────
+async function _checkSyncOnStartup() {
+  try {
+    var s = _getSyncSettings();
+    if (!s.folder) return; // no sync folder configured
+
+    var backups = await window.electronAPI.listSyncBackups(s.folder);
+    if (!backups || !backups.length) return; // no backups in folder
+
+    // Get the newest backup
+    var newest = backups[0]; // already sorted newest-first by main.js
+    if (!newest) return;
+
+    // Read the newest backup to check its metadata
+    var result = await window.electronAPI.restoreSyncBackup(s.folder, newest.name);
+    if (!result || result.error || !result.data) return;
+
+    var remoteData = result.data;
+    var remoteDevice = remoteData.deviceName || 'Unknown device';
+    var remoteTimestamp = remoteData.dataTimestamp || remoteData.exportDate || '';
+    var localTimestamp = state._lastEditTimestamp || '';
+    var myDevice = _getDeviceName();
+
+    // If the remote backup is from this same device, skip
+    if (remoteDevice === myDevice) return;
+
+    // Compare timestamps
+    var remoteDate = remoteTimestamp ? new Date(remoteTimestamp) : null;
+    var localDate = localTimestamp ? new Date(localTimestamp) : null;
+
+    if (!remoteDate || isNaN(remoteDate)) return; // can't compare
+
+    // If local has no timestamp (first run or old data), prompt anyway
+    var remoteIsNewer = !localDate || isNaN(localDate) || remoteDate > localDate;
+
+    if (!remoteIsNewer) return; // local is newer or same, nothing to do
+
+    // Check for conflict: did we also edit since the last sync?
+    var lastSync = s.lastSync ? new Date(s.lastSync) : null;
+    var localEditedSinceSync = localDate && lastSync && localDate > lastSync;
+    var remoteEditedSinceSync = remoteDate && lastSync && remoteDate > lastSync;
+    var isConflict = localEditedSinceSync && remoteEditedSinceSync;
+
+    // Format dates for display
+    var remoteDateStr = remoteDate.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    var localDateStr = localDate && !isNaN(localDate)
+      ? localDate.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : 'Unknown';
+
+    // Remote has more data?
+    var remoteRecipes = (remoteData.recipes || []).length;
+    var remoteIngs = (remoteData.ingredients || []).length;
+    var localRecipes = (state.recipes || []).length;
+    var localIngs = (state.ingredients || []).length;
+
+    // Show the sync prompt modal
+    _showSyncPrompt({
+      remoteDevice: remoteDevice,
+      remoteDateStr: remoteDateStr,
+      localDevice: myDevice,
+      localDateStr: localDateStr,
+      remoteRecipes: remoteRecipes,
+      remoteIngs: remoteIngs,
+      localRecipes: localRecipes,
+      localIngs: localIngs,
+      isConflict: isConflict,
+      backupFilename: newest.name,
+      folder: s.folder
+    });
+
+  } catch(e) {
+    console.warn('[SyncCheck]', e);
+    // Silently fail — don't block app startup
+  }
+}
+
+function _showSyncPrompt(info) {
+  // Remove any existing prompt
+  var old = document.getElementById('sync-prompt-overlay');
+  if (old) old.remove();
+
+  var conflictWarning = info.isConflict
+    ? '<div style="margin:12px 0;padding:10px 14px;background:var(--red-bg);border:1px solid rgba(224,92,92,.3);border-radius:var(--radius-sm);font-size:12px;color:var(--red)">'
+      + '<b>⚠ Conflict detected:</b> Both devices have changes since the last sync. Choose which version to keep.'
+      + '</div>'
+    : '';
+
+  var overlay = document.createElement('div');
+  overlay.id = 'sync-prompt-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.style.cssText = 'z-index:9999';
+  overlay.innerHTML =
+    '<div class="modal" style="width:520px;animation:modalIn .2s ease">'
+    + '<div class="modal-header"><h2>☁ Newer Data Found</h2></div>'
+    + '<div class="modal-body" style="padding:20px">'
+    + '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">A newer backup was found in your sync folder from a different device.</p>'
+    + conflictWarning
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">'
+    // Remote card
+    + '<div style="padding:14px;background:var(--accent-bg);border:1px solid var(--accent-dim);border-radius:var(--radius-sm)">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--accent);font-weight:700;margin-bottom:8px">☁ Cloud Version</div>'
+    + '<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px">' + escHtml(info.remoteDevice) + '</div>'
+    + '<div style="font-size:11px;color:var(--text-secondary)">' + escHtml(info.remoteDateStr) + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">' + info.remoteRecipes + ' recipes · ' + info.remoteIngs + ' ingredients</div>'
+    + '</div>'
+    // Local card
+    + '<div style="padding:14px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm)">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:8px">💻 This Device</div>'
+    + '<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px">' + escHtml(info.localDevice) + '</div>'
+    + '<div style="font-size:11px;color:var(--text-secondary)">' + escHtml(info.localDateStr) + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">' + info.localRecipes + ' recipes · ' + info.localIngs + ' ingredients</div>'
+    + '</div>'
+    + '</div>'
+    + '</div>'
+    + '<div class="modal-footer" style="justify-content:space-between">'
+    + '<button class="btn-secondary" onclick="_syncPromptDismiss()" style="font-size:12px">Keep local data</button>'
+    + '<button class="btn-primary" onclick="_syncPromptLoadRemote(\'' + escAttr(info.backupFilename) + '\')" style="font-size:12px">☁ Load cloud version</button>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+function _syncPromptDismiss() {
+  var el = document.getElementById('sync-prompt-overlay');
+  if (el) el.remove();
+}
+
+async function _syncPromptLoadRemote(filename) {
+  var el = document.getElementById('sync-prompt-overlay');
+  if (el) el.remove();
+
+  var s = _getSyncSettings();
+  if (!s.folder) return;
+
+  try {
+    var result = await window.electronAPI.restoreSyncBackup(s.folder, filename);
+    if (result.error) { showToast('Sync restore failed: ' + result.error, 'error', 4000); return; }
+    var data = result.data;
+    if (data.recipes) state.recipes = data.recipes;
+    if (data.ingredients) state.ingredients = data.ingredients;
+    if (data.suppliers) state.suppliers = data.suppliers;
+    if (data.settings) {
+      if (data.settings.currency) state.currency = data.settings.currency;
+      if (data.settings.activeGP) state.activeGP = data.settings.activeGP;
+      if (data.settings.vatRate !== undefined) state.vatRate = data.settings.vatRate;
+      if (data.settings.recipeCategories) state.recipeCategories = data.settings.recipeCategories;
+    }
+    if (data.dataTimestamp) state._lastEditTimestamp = data.dataTimestamp;
+    await save();
+    showToast('✓ Cloud version loaded from ' + (data.deviceName || 'cloud') + ' — reloading…', 'success', 2500);
+    setTimeout(function() { location.reload(); }, 2000);
+  } catch(e) {
+    showToast('Sync restore failed: ' + e.message, 'error', 4000);
   }
 }
 

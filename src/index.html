@@ -468,11 +468,11 @@
           <button class="btn-secondary" onclick="openRestoreModal()">↩ Restore</button>
         </div>
       </div>
-      <div style="padding:20px 28px 40px;max-width:760px">
+      <div style="padding:24px 28px 40px;max-width:760px;display:flex;flex-direction:column;gap:20px">
 
       <!-- General Settings -->
-      <div class="card" style="margin-bottom:20px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:16px">🏪 Business settings</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🏪 Business settings</div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
 
@@ -516,8 +516,8 @@
       </div>
 
       <!-- Appearance -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:16px">🎨 Appearance</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🎨 Appearance</div>
 
         <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm)">
           <div>
@@ -532,8 +532,8 @@
       </div>
 
       <!-- Warnings & Behaviour -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:16px">⚠️ Warnings & Behaviour</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">⚠️ Warnings & Behaviour</div>
 
         <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm)">
           <div>
@@ -548,8 +548,8 @@
 
 
       <!-- 🔒 PIN Lock -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">🔒 App Lock (PIN)</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🔒 App Lock (PIN)</div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Set a 4-digit PIN to lock the app on startup. Useful if the device is shared.</p>
 
         <!-- Enable toggle row -->
@@ -577,8 +577,8 @@
       </div>
 
       <!-- 🧪 Allergen Auto-Detection -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">🧪 Allergen Auto-Detection</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🧪 Allergen Auto-Detection</div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Scan every ingredient in your library and automatically apply allergens based on the ingredient name. Existing allergens will be kept — only new ones are added.</p>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <button class="btn-secondary" onclick="openBulkPastePrice()" style="margin-bottom:12px">📋 Bulk Price Update (paste list)</button>
@@ -588,8 +588,8 @@
       </div>
 
       <!-- 📦 Data Transfer -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">📦 Data Transfer</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">📦 Data Transfer</div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Export data to a JSON file and import it on another device. Duplicates are skipped on import.</p>
 
         <!-- Recipes -->
@@ -624,8 +624,8 @@
       </div>
 
       <!-- Locations -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">📍 Locations</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">📍 Locations</div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Manage multiple locations — each with its own recipes, ingredients and suppliers.</p>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn-primary btn-sm" onclick="openLocationManager()">📍 Manage Locations</button>
@@ -634,8 +634,8 @@
       </div>
 
       <!-- Auto-Backup & Restore -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">🔄 Auto-Backup & Restore</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🔄 Auto-Backup & Restore</div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">The app automatically keeps the last 5 encrypted backups of your data before each save. Select a backup below to restore it.</p>
         <div style="display:flex;gap:8px;margin-bottom:14px">
           <button class="btn-secondary btn-sm" onclick="loadBackupList()">↻ Refresh backup list</button>
@@ -645,12 +645,15 @@
       </div>
 
       <!-- Cloud Sync / Folder Backup -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">☁ Cloud Sync & Folder Backup</div>
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
-          Choose a cloud sync folder (Google Drive, Dropbox, OneDrive, or any folder) to automatically back up your data.
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">☁ Cloud Sync & Folder Backup</div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+          Choose a cloud sync folder to automatically back up your data.
           Backups are saved as JSON files on each manual sync or automatically when enabled.
         </p>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px;padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm);line-height:1.6">
+          💡 <b style="color:var(--text-secondary)">Tip:</b> Select a folder that's synced to the cloud by an app like <b>Google Drive</b>, <b>OneDrive</b>, or <b>Dropbox</b>. The folder appears as a normal folder on your PC — the cloud app syncs it automatically in the background.
+        </div>
 
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
           <button class="btn-primary btn-sm" onclick="chooseSyncFolder()">📂 Choose Folder</button>
@@ -674,8 +677,8 @@
       </div>
 
       <!-- AI Invoice Scanner -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">⚙ AI Invoice Scanner</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">⚙ AI Invoice Scanner</div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Choose which AI models appear in the invoice scanner and manage your API keys. Keys are stored locally and never leave your device except when sent directly to the AI provider.</p>
         <div style="display:flex;flex-direction:column;gap:10px">
 
@@ -729,8 +732,8 @@
       </div>
 
       <!-- USDA Nutrition API Key -->
-      <div class="card" style="max-width:720px;margin-bottom:24px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:14px">🥗 USDA Nutrition API Key</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🥗 USDA Nutrition API Key</div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">Used by the Nutrition Scanner tool to look up nutritional values from the US government database. Free key at <span style="color:var(--accent)">fdc.nal.usda.gov</span> — takes 30 seconds to register.</p>
         <div style="display:flex;align-items:center;gap:8px">
           <span id="usda-key-status-settings" style="font-size:12px;min-width:70px"></span>
@@ -741,8 +744,8 @@
       </div>
 
       <!-- About / Updates -->
-      <div class="card" style="margin-bottom:20px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:16px">ℹ About</div>
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">ℹ About</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:16px">
           <div>
             <div style="font-size:14px;font-weight:700;color:var(--text-primary)">Recipe Costing</div>
