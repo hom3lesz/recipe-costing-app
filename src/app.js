@@ -1507,6 +1507,9 @@ async function init() {
       console.warn("[update-error]", msg);
     });
   }
+
+  // Check sync folder for newer backups from another device
+  _checkSyncOnStartup();
 }
 
 function seedData() {
@@ -12328,6 +12331,8 @@ async function _renderSyncUI() {
     if (controlsEl) controlsEl.style.display = 'block';
     if (openBtn) openBtn.style.display = '';
     if (autoToggle) autoToggle.checked = !!s.autoSync;
+    var deviceInput = document.getElementById('sync-device-name');
+    if (deviceInput) deviceInput.value = s.deviceName || 'This PC';
     if (statusEl) {
       statusEl.textContent = s.lastSync
         ? 'Last synced: ' + new Date(s.lastSync).toLocaleString()

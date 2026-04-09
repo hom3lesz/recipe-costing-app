@@ -13,7 +13,9 @@
       "Bash(node -c src/app.js)",
       "Bash(node -c main.js)",
       "Bash(node -c src/preload.js)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(grep -o '\"content\":\\\\[{\"type\":\"text\",\"text\":\"[^\"]*' \"C:\\\\Users\\\\gytod\\\\.claude\\\\projects\\\\C--Users-gytod-Desktop-recipe-costing-app\\\\0a7039d3-262a-481d-b0fb-f4aa7d1ab671.jsonl\")",
+      "Bash(grep -o '\"role\":\"user\",\"content\":\\\\[{\"type\":\"text\",\"text\":\"[^\"]*' \"C:\\\\Users\\\\gytod\\\\.claude\\\\projects\\\\C--Users-gytod-Desktop-recipe-costing-app\\\\0a7039d3-262a-481d-b0fb-f4aa7d1ab671.jsonl\")"
     ]
   }
 }
