@@ -133,7 +133,7 @@
       </div>
     </div>
     <div style="padding:4px 10px 6px;display:flex;align-items:center;gap:4px">
-      <input id="sidebar-recipe-search" type="text" placeholder="Filter recipes…" oninput="renderSidebarRecipes()" style="flex:1;min-width:0;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:11px;padding:5px 8px;border-radius:5px;outline:none;box-sizing:border-box"></input>
+      <input id="sidebar-recipe-search" type="text" placeholder="Filter recipes…" oninput="debouncedSearch('sidebar', renderSidebarRecipes)" style="flex:1;min-width:0;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:11px;padding:5px 8px;border-radius:5px;outline:none;box-sizing:border-box"></input>
       <button onclick="openSetPricesModal()" title="Set sell prices" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px 3px;border-radius:3px;line-height:1;flex-shrink:0" onmouseenter="this.style.color='var(--accent)'" onmouseleave="this.style.color='var(--text-muted)'">💰</button>
       <button id="sidebar-collapse-btn" onclick="toggleAllSidebarCats()" title="Collapse/expand all categories" style="background:none;border:1px solid var(--border);color:var(--text-muted);cursor:pointer;font-size:10px;padding:2px 5px;border-radius:3px;line-height:1;flex-shrink:0" onmouseenter="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseleave="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">≡</button>
     </div>
@@ -184,7 +184,7 @@
         </div>
         <!-- Toolbar — matches ingredient library -->
         <div class="ing-controls-bar">
-          <input id="rl-search" type="text" placeholder="Search by name or category…" oninput="renderRecipeList()"></input>
+          <input id="rl-search" type="text" placeholder="Search: name, cat:dairy, #tag, &gt;5, fuzzy (chkn)…" oninput="debouncedSearch('rl', renderRecipeList);updateRecipeListSuggestions()" onfocus="updateRecipeListSuggestions()"></input>
           <select id="rl-cat" onchange="renderRecipeList()">
             <option value="">All categories</option>
           </select>
@@ -268,7 +268,7 @@
         <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg-card)">
           <div style="display:flex;align-items:center;gap:6px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:5px 10px;flex:1;max-width:280px">
             <svg width="12" height="12" viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:var(--text-muted);flex-shrink:0"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            <input type="text" id="ing-search" placeholder="Search by name, category, supplier or allergen…" oninput="renderIngredientLibrary()" style="border:none;outline:none;font-size:12px;background:transparent;color:var(--text-primary);width:100%;font-family:var(--font)"></input>
+            <input type="text" id="ing-search" placeholder="Search: name, cat:dairy, sup:bidfood, allergen:nuts, &gt;5…" oninput="debouncedSearch('ing', renderIngredientLibrary);updateIngSuggestions()" onfocus="updateIngSuggestions()" style="border:none;outline:none;font-size:12px;background:transparent;color:var(--text-primary);width:100%;font-family:var(--font)"></input>
           </div>
           <div id="ing-panel-title" style="font-size:12px;color:var(--text-muted);flex:1"></div>
           <div id="ing-stale-badge" style="display:none"></div>
@@ -359,7 +359,7 @@
       <div class="page-header">
         <h1>Suppliers</h1>
         <div style="display:flex;gap:10px;align-items:center">
-          <input type="text" id="supplier-search" placeholder="Search suppliers…" oninput="renderSupplierList()" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;padding:7px 12px;border-radius:var(--radius-sm);outline:none;width:220px"></input>
+          <input type="text" id="supplier-search" placeholder="Search suppliers…" oninput="debouncedSearch('sup', renderSupplierList)" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;padding:7px 12px;border-radius:var(--radius-sm);outline:none;width:220px"></input>
           <button class="btn-primary" onclick="openSupplierModal()">+ Add Supplier</button>
         </div>
       </div>
@@ -1597,7 +1597,8 @@
   <div class="modal" style="width:620px;margin-top:80px;align-self:flex-start">
     <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
       <span style="font-size:18px;color:var(--text-muted)">⌕</span>
-      <input type="text" id="global-search-input" placeholder="Search recipes, ingredients, tags, notes…" oninput="runGlobalSearch()" onkeydown="if(event.key==='Escape')closeSearch()" style="flex:1;background:none;border:none;outline:none;font-family:var(--font);font-size:15px;color:var(--text-primary)"></input>
+      <input type="text" id="global-search-input" placeholder="Search: recipes, ingredients, cat:dairy, #vegan, sup:bidfood, &gt;5…" oninput="debouncedSearch('global', runGlobalSearch)" onkeydown="handleGlobalSearchKey(event)" style="flex:1;background:none;border:none;outline:none;font-family:var(--font);font-size:15px;color:var(--text-primary)"></input>
+      <button onclick="saveCurrentSearch()" title="Save this search as a preset" style="background:transparent;border:1px solid var(--border);color:var(--text-muted);font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer">⭐ Save</button>
       <kbd style="font-size:10px;background:var(--bg-card2);border:1px solid var(--border);padding:2px 6px;border-radius:4px;color:var(--text-muted)">Esc</kbd>
     </div>
     <div id="search-results" style="max-height:460px;overflow-y:auto;padding:8px"></div>

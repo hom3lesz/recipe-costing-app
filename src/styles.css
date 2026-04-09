@@ -405,6 +405,64 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 .card:hover { border-color: var(--border-light); }
 
+/* ─── Search match highlight ─── */
+mark.search-hl {
+  background: var(--accent-bg);
+  color: var(--accent);
+  padding: 0 2px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.search-clear-btn:focus { outline: none; }
+.search-clear-btn:hover { color: var(--text-primary) !important; }
+
+/* ─── Search suggestions dropdown ─── */
+.search-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+  z-index: 100;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.search-suggest-section {
+  padding: 4px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  font-weight: 700;
+  background: var(--bg-card2);
+}
+.search-suggest-item {
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-suggest-item:last-child { border-bottom: none; }
+.search-suggest-item:hover,
+.search-suggest-item.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.search-suggest-item .ss-meta {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+.search-hit-active { background: var(--accent-bg) !important; }
+
 /* ─── Empty state ─── */
 .empty-state {
   flex: 1;

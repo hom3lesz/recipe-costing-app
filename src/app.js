@@ -1510,6 +1510,18 @@ async function init() {
 
   // Check sync folder for newer backups from another device
   _checkSyncOnStartup();
+
+  // Enhance all search inputs (Esc clear, × button, persistence)
+  _enhanceAllSearchInputs();
+}
+
+function _enhanceAllSearchInputs() {
+  enhanceSearchInput("sidebar-recipe-search", "sidebar", () => debouncedSearch("sidebar", renderSidebarRecipes));
+  enhanceSearchInput("rl-search", "rl", () => debouncedSearch("rl", renderRecipeList));
+  enhanceSearchInput("ing-search", "ing", () => debouncedSearch("ing", renderIngredientLibrary));
+  enhanceSearchInput("supplier-search", "sup", () => debouncedSearch("sup", renderSupplierList));
+  enhanceSearchInput("global-search-input", "global", () => debouncedSearch("global", runGlobalSearch));
+  enhanceSearchInput("recipe-ing-search", "recing", () => debouncedSearch("recing", _filterRecipeIngredients));
 }
 
 function seedData() {
@@ -1647,6 +1659,924 @@ function escHtml(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// Shared debouncer for search inputs — avoids re-rendering on every keystroke.
+// Usage: oninput="debouncedSearch('key', renderFn)"
+const _searchDebounceTimers = {};
+function debouncedSearch(key, fn, delay) {
+  clearTimeout(_searchDebounceTimers[key]);
+  _searchDebounceTimers[key] = setTimeout(fn, delay || 80);
+}
+
+// ─── Shared search input enhancer ─────────────────────────────────────────
+// Call once (e.g. from init or after render) to wire:
+//   • Esc to clear
+//   • × clear button (injected absolutely-positioned into input's parent)
+//   • Persistence of last query in sessionStorage
+//   • Recent query history (up to 20 per key)
+// Usage: enhanceSearchInput('rl-search', 'rl', renderRecipeList)
+const _searchHistoryKey = (k) => "rc-search-hist-" + k;
+const _searchPersistKey = (k) => "rc-search-q-" + k;
+
+function getSearchHistory(key) {
+  try { return JSON.parse(sessionStorage.getItem(_searchHistoryKey(key)) || "[]"); }
+  catch { return []; }
+}
+function rememberSearchQuery(key, query) {
+  const q = String(query || "").trim();
+  if (!q || q.length < 2) return;
+  try {
+    let hist = getSearchHistory(key).filter((h) => h !== q);
+    hist.unshift(q);
+    hist = hist.slice(0, 20);
+    sessionStorage.setItem(_searchHistoryKey(key), JSON.stringify(hist));
+  } catch {}
+}
+
+function enhanceSearchInput(inputId, key, renderFn) {
+  const input = document.getElementById(inputId);
+  if (!input || input.dataset.enhanced) return;
+  input.dataset.enhanced = "1";
+
+  // 1. Restore persisted query
+  try {
+    const saved = sessionStorage.getItem(_searchPersistKey(key));
+    if (saved && !input.value) {
+      input.value = saved;
+    }
+  } catch {}
+
+  // 2. Clear button — wrap the input in a positioned span so the × stays glued
+  //    to the input itself, not the surrounding flex row (Save button, Esc kbd…).
+  let wrapper = input.parentElement;
+  const alreadyWrapped = wrapper && wrapper.classList.contains("search-input-wrap");
+  if (!alreadyWrapped) {
+    wrapper = document.createElement("span");
+    wrapper.className = "search-input-wrap";
+    // Match the input's flex/sizing so layout doesn't shift
+    const cs = getComputedStyle(input);
+    wrapper.style.cssText =
+      "position:relative;display:inline-flex;align-items:center;" +
+      (cs.flex && cs.flex !== "0 1 auto" ? "flex:" + cs.flex + ";" : "") +
+      (input.style.flex ? "flex:" + input.style.flex + ";" : "") +
+      (input.style.width ? "width:" + input.style.width + ";" : "");
+    input.parentNode.insertBefore(wrapper, input);
+    wrapper.appendChild(input);
+    // Make the input fill the wrapper
+    input.style.width = "100%";
+    input.style.boxSizing = "border-box";
+  }
+  const clearBtn = document.createElement("button");
+  clearBtn.type = "button";
+  clearBtn.className = "search-clear-btn";
+  clearBtn.innerHTML = "×";
+  clearBtn.title = "Clear (Esc)";
+  clearBtn.setAttribute("aria-label", "Clear search");
+  clearBtn.style.cssText =
+    "position:absolute;right:6px;top:50%;transform:translateY(-50%);" +
+    "background:transparent;border:none;color:var(--text-muted);font-size:16px;" +
+    "cursor:pointer;padding:0 4px;line-height:1;display:none;z-index:2;";
+  clearBtn.onmouseover = () => (clearBtn.style.color = "var(--text-primary)");
+  clearBtn.onmouseout = () => (clearBtn.style.color = "var(--text-muted)");
+  clearBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    input.value = "";
+    try { sessionStorage.removeItem(_searchPersistKey(key)); } catch {}
+    clearBtn.style.display = "none";
+    renderFn();
+    input.focus();
+  };
+  wrapper.appendChild(clearBtn);
+
+  // Add right padding to input so text doesn't overlap the × button
+  const curPadRight = parseInt(getComputedStyle(input).paddingRight, 10) || 0;
+  if (curPadRight < 22) input.style.paddingRight = "24px";
+
+  function syncClearBtn() {
+    clearBtn.style.display = input.value ? "block" : "none";
+  }
+  syncClearBtn();
+
+  // 3. Esc to clear; also remember on Enter
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (input.value) {
+        input.value = "";
+        try { sessionStorage.removeItem(_searchPersistKey(key)); } catch {}
+        syncClearBtn();
+        renderFn();
+        e.preventDefault();
+      } else {
+        input.blur();
+      }
+    } else if (e.key === "Enter") {
+      rememberSearchQuery(key, input.value);
+    }
+  });
+
+  // 4. Persist on input + sync clear button
+  input.addEventListener("input", () => {
+    try {
+      if (input.value) sessionStorage.setItem(_searchPersistKey(key), input.value);
+      else sessionStorage.removeItem(_searchPersistKey(key));
+    } catch {}
+    syncClearBtn();
+  });
+
+  // If we restored a value, trigger an initial render so results show
+  if (input.value) {
+    setTimeout(renderFn, 0);
+  }
+}
+
+// ─── Autocomplete suggestions dropdown ─────────────────────────────────────
+// Shows top items + filter-refinement shortcuts under a search input.
+//
+// Usage: showSearchSuggestions(inputId, {
+//   items: [{ label, meta, onPick }],
+//   filters: [{ label, query, count }],
+//   recent: ["query1", "query2"],
+// })
+//
+// Clicking a filter runs a callback that sets the input value and re-renders.
+function showSearchSuggestions(inputId, sections) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  // Ensure the input is wrapped (enhancer does this; fallback for unenhanced)
+  let wrap = input.parentElement;
+  if (!wrap || !wrap.classList.contains("search-input-wrap")) {
+    // Fall back: wrap here
+    wrap = document.createElement("span");
+    wrap.className = "search-input-wrap";
+    wrap.style.cssText = "position:relative;display:inline-flex;flex:1;align-items:center";
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    input.style.width = "100%";
+    input.style.boxSizing = "border-box";
+  }
+
+  // Remove any existing dropdown
+  const old = wrap.querySelector(".search-suggest");
+  if (old) old.remove();
+
+  const hasItems = (sections.items && sections.items.length) || 0;
+  const hasFilters = (sections.filters && sections.filters.length) || 0;
+  const hasRecent = (sections.recent && sections.recent.length) || 0;
+  if (!hasItems && !hasFilters && !hasRecent) return;
+
+  const dd = document.createElement("div");
+  dd.className = "search-suggest";
+  let html = "";
+
+  if (hasItems) {
+    html += '<div class="search-suggest-section">Items</div>';
+    sections.items.forEach((it, idx) => {
+      html +=
+        `<div class="search-suggest-item" data-ss-kind="item" data-ss-idx="${idx}">` +
+        `<span style="flex:1">${it.label}</span>` +
+        (it.meta ? `<span class="ss-meta">${it.meta}</span>` : "") +
+        "</div>";
+    });
+  }
+  if (hasFilters) {
+    html += '<div class="search-suggest-section">Refine</div>';
+    sections.filters.forEach((f, idx) => {
+      html +=
+        `<div class="search-suggest-item" data-ss-kind="filter" data-ss-idx="${idx}">` +
+        `<span style="flex:1">${f.label}</span>` +
+        `<span class="ss-meta">${f.count != null ? f.count : ""}</span>` +
+        "</div>";
+    });
+  }
+  if (hasRecent) {
+    html += '<div class="search-suggest-section">Recent</div>';
+    sections.recent.forEach((r, idx) => {
+      html +=
+        `<div class="search-suggest-item" data-ss-kind="recent" data-ss-idx="${idx}">` +
+        `<span style="flex:1;font-family:monospace;font-size:11px">${escHtml(r)}</span>` +
+        "</div>";
+    });
+  }
+
+  dd.innerHTML = html;
+  wrap.appendChild(dd);
+
+  // Wire clicks — use mousedown so it fires before the input's blur
+  dd.querySelectorAll(".search-suggest-item").forEach((el) => {
+    el.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const kind = el.dataset.ssKind;
+      const idx = parseInt(el.dataset.ssIdx, 10);
+      if (kind === "item" && sections.items[idx]) {
+        sections.items[idx].onPick && sections.items[idx].onPick();
+      } else if (kind === "filter" && sections.filters[idx]) {
+        const f = sections.filters[idx];
+        input.value = f.query;
+        hideSearchSuggestions(inputId);
+        sections.onFilterPick && sections.onFilterPick(f.query);
+      } else if (kind === "recent" && sections.recent[idx]) {
+        input.value = sections.recent[idx];
+        hideSearchSuggestions(inputId);
+        sections.onFilterPick && sections.onFilterPick(sections.recent[idx]);
+      }
+    });
+  });
+
+  // Auto-hide on blur
+  const blurHandler = () => {
+    setTimeout(() => hideSearchSuggestions(inputId), 150);
+  };
+  input.removeEventListener("blur", input._ssBlurHandler || (() => {}));
+  input._ssBlurHandler = blurHandler;
+  input.addEventListener("blur", blurHandler);
+}
+
+function hideSearchSuggestions(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const wrap = input.parentElement;
+  if (!wrap) return;
+  const dd = wrap.querySelector(".search-suggest");
+  if (dd) dd.remove();
+}
+
+// Compute suggestions for the recipe list search
+function _computeRecipeSuggestions(query) {
+  const q = String(query || "").trim().toLowerCase();
+  const sections = { items: [], filters: [], recent: [] };
+
+  if (!q) {
+    // Empty query → show recent queries + popular categories
+    sections.recent = getSearchHistory("rl").slice(0, 5);
+    const cats = [...new Set(state.recipes.map((r) => r.category).filter(Boolean))];
+    sections.filters = cats.slice(0, 5).map((c) => ({
+      label: `📁 <b>cat:</b>${escHtml(c)}`,
+      query: `cat:${c.toLowerCase()}`,
+      count: state.recipes.filter((r) => (r.category || "").toLowerCase() === c.toLowerCase()).length,
+    }));
+    return sections;
+  }
+
+  // Top 3 recipe matches (if query isn't already a pure filter expression)
+  const parsed = parseSearchQuery(q);
+  const hasFreeText = parsed.phrases && parsed.phrases.length;
+  if (hasFreeText) {
+    const topRecipes = searchItems(q, state.recipes, [
+      { weight: 3, get: (r) => r.name },
+      { key: "cat", weight: 2, get: (r) => r.category || "" },
+      { key: "tag", weight: 2, get: (r) => r.tags || [] },
+      { weight: 1, get: (r) => r.notes || "" },
+    ]).slice(0, 3);
+    const hlQ = parsed.phrases.join(" ");
+    sections.items = topRecipes.map((r) => ({
+      label: highlightMatch(r.name, hlQ),
+      meta: escHtml(r.category || ""),
+      onPick: () => {
+        hideSearchSuggestions("rl-search");
+        openRecipeFromList(r.id);
+      },
+    }));
+  }
+
+  // Filter refinements: matching categories and tags
+  const allCats = [...new Set(state.recipes.map((r) => r.category).filter(Boolean))];
+  const matchingCats = allCats
+    .filter((c) => c.toLowerCase().includes(q) || q.includes(c.toLowerCase()))
+    .slice(0, 3);
+  for (const c of matchingCats) {
+    sections.filters.push({
+      label: `📁 <b>cat:</b>${escHtml(c)}`,
+      query: `cat:${c.toLowerCase()}`,
+      count: state.recipes.filter((r) => (r.category || "").toLowerCase() === c.toLowerCase()).length,
+    });
+  }
+  const allTags = [...new Set(state.recipes.flatMap((r) => r.tags || []))];
+  const matchingTags = allTags
+    .filter((t) => t.toLowerCase().includes(q))
+    .slice(0, 3);
+  for (const t of matchingTags) {
+    sections.filters.push({
+      label: `🏷 <b>#</b>${escHtml(t)}`,
+      query: `#${t.toLowerCase()}`,
+      count: state.recipes.filter((r) => (r.tags || []).includes(t)).length,
+    });
+  }
+
+  return sections;
+}
+
+// Compute suggestions for the ingredient library search
+function _computeIngSuggestions(query) {
+  const q = String(query || "").trim().toLowerCase();
+  const sections = { items: [], filters: [], recent: [] };
+
+  if (!q) {
+    sections.recent = getSearchHistory("ing").slice(0, 5);
+    const cats = [...new Set(state.ingredients.map((i) => i.category).filter(Boolean))];
+    sections.filters = cats.slice(0, 5).map((c) => ({
+      label: `📁 <b>cat:</b>${escHtml(c)}`,
+      query: `cat:${c.toLowerCase()}`,
+      count: state.ingredients.filter((i) => (i.category || "").toLowerCase() === c.toLowerCase()).length,
+    }));
+    return sections;
+  }
+
+  const parsed = parseSearchQuery(q);
+  const hasFreeText = parsed.phrases && parsed.phrases.length;
+  if (hasFreeText) {
+    const topIngs = searchItems(q, state.ingredients, [
+      { weight: 3, get: (i) => i.name },
+      { key: "cat", weight: 2, get: (i) => i.category || "" },
+    ]).slice(0, 3);
+    const hlQ = parsed.phrases.join(" ");
+    sections.items = topIngs.map((i) => ({
+      label: highlightMatch(i.name, hlQ),
+      meta: escHtml(i.category || ""),
+      onPick: () => {
+        hideSearchSuggestions("ing-search");
+        openIngredientModal(i.id);
+      },
+    }));
+  }
+
+  // Category refinements
+  const allCats = [...new Set(state.ingredients.map((i) => i.category).filter(Boolean))];
+  const matchingCats = allCats
+    .filter((c) => c.toLowerCase().includes(q))
+    .slice(0, 3);
+  for (const c of matchingCats) {
+    sections.filters.push({
+      label: `📁 <b>cat:</b>${escHtml(c)}`,
+      query: `cat:${c.toLowerCase()}`,
+      count: state.ingredients.filter((i) => (i.category || "").toLowerCase() === c.toLowerCase()).length,
+    });
+  }
+  // Supplier refinements
+  const matchingSups = state.suppliers
+    .filter((s) => s.name.toLowerCase().includes(q))
+    .slice(0, 3);
+  for (const s of matchingSups) {
+    sections.filters.push({
+      label: `🚚 <b>sup:</b>${escHtml(s.name)}`,
+      query: `sup:${s.name.toLowerCase()}`,
+      count: state.ingredients.filter((i) => i.supplierId === s.id).length,
+    });
+  }
+  // Allergen refinements
+  const allergens = [...new Set(state.ingredients.flatMap((i) => i.allergens || []))];
+  const matchingAllergens = allergens
+    .filter((a) => a.toLowerCase().includes(q))
+    .slice(0, 2);
+  for (const a of matchingAllergens) {
+    sections.filters.push({
+      label: `⚠ <b>allergen:</b>${escHtml(a)}`,
+      query: `allergen:${a.toLowerCase()}`,
+      count: state.ingredients.filter((i) => (i.allergens || []).includes(a)).length,
+    });
+  }
+
+  return sections;
+}
+
+// Public entry points wired from the render functions / inputs
+function updateRecipeListSuggestions() {
+  const input = document.getElementById("rl-search");
+  if (!input || document.activeElement !== input) return;
+  const suggestions = _computeRecipeSuggestions(input.value);
+  suggestions.onFilterPick = () => debouncedSearch("rl", renderRecipeList);
+  showSearchSuggestions("rl-search", suggestions);
+}
+function updateIngSuggestions() {
+  const input = document.getElementById("ing-search");
+  if (!input || document.activeElement !== input) return;
+  const suggestions = _computeIngSuggestions(input.value);
+  suggestions.onFilterPick = () => debouncedSearch("ing", renderIngredientLibrary);
+  showSearchSuggestions("ing-search", suggestions);
+}
+
+// Helper to set a result count badge next to a search input
+function setSearchCount(badgeId, shown, total) {
+  const el = document.getElementById(badgeId);
+  if (!el) return;
+  if (shown === total) {
+    el.textContent = total + " " + (total === 1 ? "item" : "items");
+    el.style.color = "var(--text-muted)";
+  } else {
+    el.textContent = shown + " of " + total;
+    el.style.color = "var(--accent)";
+  }
+}
+
+// ─── Smart Search Utility ─────────────────────────────────────────────────────
+// Fuzzy + multi-word + ranked matching for all search boxes in the app.
+//
+// searchScore(query, text) → 0 (no match) or positive number (higher = better)
+// Scoring:
+//   1000 — exact match
+//    800 — starts with query
+//    500 — contains full query as substring
+//    200 — all query tokens appear (any order, substring)
+//    100 — fuzzy: all query chars appear in order (subsequence)
+//   + bonus for shorter text (so "Tomato" ranks above "Tomato & Basil Soup Mix")
+function searchScore(query, text) {
+  if (!query) return 1;
+  if (!text) return 0;
+  const q = String(query).toLowerCase().trim();
+  const t = String(text).toLowerCase();
+  if (!q) return 1;
+
+  // 1. Exact match
+  if (t === q) return 1000 + (1000 - Math.min(t.length, 999));
+  // 2. Starts with
+  if (t.startsWith(q)) return 800 + (500 - Math.min(t.length, 499));
+  // 3. Contains full substring
+  if (t.includes(q)) return 500 + (300 - Math.min(t.length, 299));
+
+  // 4. Multi-word AND match — split query into tokens, all must appear
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1 && tokens.every((tok) => t.includes(tok))) {
+    return 200 + (200 - Math.min(t.length, 199));
+  }
+
+  // 5. Fuzzy subsequence match — all query chars appear in order
+  //    e.g. "chkn" matches "chicken", "tmt" matches "tomato"
+  //    Only for queries ≥ 3 chars to avoid noise
+  if (q.length >= 3) {
+    let i = 0;
+    for (let j = 0; j < t.length && i < q.length; j++) {
+      if (t[j] === q[i]) i++;
+    }
+    if (i === q.length) {
+      // Shorter text wins; longer gap penalty implicit via length
+      return 100 + (100 - Math.min(t.length, 99));
+    }
+  }
+
+  return 0;
+}
+
+// parseSearchQuery(query) → { phrases, excludes, orGroups, filters }
+// Rich query syntax:
+//   cat:dairy                 → category contains "dairy"
+//   sup:bidfood               → supplier contains "bidfood"
+//   allergen:nuts             → allergen list contains "nuts"
+//   tag:vegan  /  #vegan      → tag match
+//   kcal:<500  protein:>30    → nutrition comparisons
+//   >5   <2.50   >=10         → numeric comparison on the primary numeric field
+//   "tomato basil"            → exact phrase (quoted)
+//   -cream                    → exclude results containing "cream"
+//   beef OR chicken           → union (OR is uppercase keyword)
+//   NOT fish                  → same as -fish
+// Plain tokens → free-text search (AND across them).
+const NUTRITION_PREFIXES = ["kcal", "protein", "fat", "carbs", "sugar", "salt"];
+function parseSearchQuery(query) {
+  const out = { phrases: [], excludes: [], orGroups: [], filters: [] };
+  const q = String(query || "").trim();
+  if (!q) return out;
+
+  // Tokenize, respecting quoted phrases
+  const tokens = [];
+  const re = /"([^"]+)"|(\S+)/g;
+  let m;
+  while ((m = re.exec(q)) !== null) {
+    if (m[1] != null) tokens.push({ t: m[1], quoted: true });
+    else tokens.push({ t: m[2], quoted: false });
+  }
+
+  // Handle OR / NOT as positional keywords
+  // Build groups: [[term, term], [term]] — outer AND, inner OR
+  const andGroups = [[]];
+  let i = 0;
+  let nextExclude = false;
+  while (i < tokens.length) {
+    const tok = tokens[i];
+    const raw = tok.t;
+
+    // OR keyword joins the previous term with the next
+    if (!tok.quoted && raw === "OR" && andGroups[andGroups.length - 1].length && i + 1 < tokens.length) {
+      i++;
+      const nextTok = tokens[i];
+      andGroups[andGroups.length - 1].push({ ...parseTerm(nextTok), or: true, excluded: false });
+      i++;
+      continue;
+    }
+    // NOT keyword excludes the next term
+    if (!tok.quoted && raw === "NOT" && i + 1 < tokens.length) {
+      i++;
+      nextExclude = true;
+      continue;
+    }
+    // Leading - → exclude
+    let excluded = nextExclude;
+    nextExclude = false;
+    let term = raw;
+    if (!tok.quoted && term.startsWith("-") && term.length > 1) {
+      excluded = true;
+      term = term.slice(1);
+    }
+
+    const parsed = parseTerm({ t: term, quoted: tok.quoted });
+    parsed.excluded = excluded;
+    andGroups.push([parsed]);
+    i++;
+  }
+
+  // Flatten
+  for (const group of andGroups) {
+    if (!group.length) continue;
+    for (const p of group) {
+      if (p.filter) {
+        if (p.excluded) p.filter.excluded = true;
+        out.filters.push(p.filter);
+        continue;
+      }
+      if (p.phrase == null) continue;
+      if (p.excluded) out.excludes.push(p.phrase);
+      else if (group.length > 1 && group.some((x) => x.or)) {
+        // OR group — collect all OR-tagged terms together
+        const orTerms = group.filter((x) => x.phrase != null && !x.excluded).map((x) => x.phrase);
+        if (orTerms.length) out.orGroups.push(orTerms);
+        break;
+      } else {
+        out.phrases.push(p.phrase);
+      }
+    }
+  }
+
+  return out;
+}
+
+// Helper: parse one token into either a filter or a free-text phrase
+function parseTerm(tok) {
+  const raw = tok.t;
+  // Quoted phrase → always free text
+  if (tok.quoted) return { phrase: raw.toLowerCase() };
+
+  // Numeric comparison: >5, <2.5, >=10, <=0.5  (on primary numeric field)
+  const numM = raw.match(/^(>=|<=|>|<)(-?\d+(?:\.\d+)?)$/);
+  if (numM) {
+    return { filter: { key: "num", op: numM[1], value: parseFloat(numM[2]) } };
+  }
+  // #tag shorthand
+  if (raw.startsWith("#") && raw.length > 1) {
+    return { filter: { key: "tag", op: ":", value: raw.slice(1).toLowerCase() } };
+  }
+  // key:value or key:<N / key:>N (nutrition etc.)
+  const kvM = raw.match(/^([a-z]+):(.+)$/i);
+  if (kvM) {
+    const key = kvM[1].toLowerCase();
+    let val = kvM[2];
+    // Nutrition comparisons: kcal:<500 protein:>30
+    if (NUTRITION_PREFIXES.includes(key)) {
+      const nmM = val.match(/^(>=|<=|>|<)?(-?\d+(?:\.\d+)?)$/);
+      if (nmM) {
+        return { filter: { key, op: nmM[1] || "=", value: parseFloat(nmM[2]) } };
+      }
+    }
+    const normKey = key
+      .replace(/^category$/, "cat")
+      .replace(/^supplier$/, "sup");
+    if (["cat", "sup", "tag", "allergen"].includes(normKey)) {
+      return { filter: { key: normKey, op: ":", value: val.toLowerCase() } };
+    }
+  }
+  return { phrase: raw.toLowerCase() };
+}
+
+// searchItems(query, items, fieldExtractors) → sorted matching items (best first)
+// fieldExtractors: array of { weight, get: (item) => string | string[] }
+//   Special extractor keys used by filter prefixes:
+//     key: 'cat'      → category filter target
+//     key: 'sup'      → supplier name filter target
+//     key: 'tag'      → tag filter target (array)
+//     key: 'allergen' → allergen filter target (array)
+//     key: 'num'      → numeric field for >/< comparisons
+//     key: 'kcal' | 'protein' | 'fat' | 'carbs' | 'sugar' | 'salt'
+// Returns array of items (unchanged order when query is empty).
+function searchItems(query, items, fieldExtractors) {
+  const rawQ = String(query || "").trim();
+  if (!rawQ) return items.slice();
+  const parsed = parseSearchQuery(rawQ);
+
+  const textExtractors = fieldExtractors.filter((fx) => fx.searchable !== false);
+
+  // Build a flat "haystack" per item for free-text exclude/OR matching
+  function itemText(item) {
+    const parts = [];
+    for (const fx of textExtractors) {
+      const v = fx.get(item);
+      if (v == null) continue;
+      if (Array.isArray(v)) parts.push(v.join(" "));
+      else parts.push(String(v));
+    }
+    return parts.join(" ").toLowerCase();
+  }
+
+  // Apply structured filters first (AND)
+  let pool = items.filter((item) => {
+    for (const f of parsed.filters) {
+      const fx = fieldExtractors.find((x) => x.key === f.key);
+      if (!fx) {
+        if (f.excluded) continue; // unknown exclude filter is harmless
+        return false;
+      }
+      const val = fx.get(item);
+      let matched;
+      if (["num", "kcal", "protein", "fat", "carbs", "sugar", "salt"].includes(f.key)) {
+        const n = Number(val);
+        if (isNaN(n)) { matched = false; }
+        else if (f.op === ">") matched = n > f.value;
+        else if (f.op === "<") matched = n < f.value;
+        else if (f.op === ">=") matched = n >= f.value;
+        else if (f.op === "<=") matched = n <= f.value;
+        else matched = Math.abs(n - f.value) < 0.0001;
+      } else {
+        if (val == null) matched = false;
+        else {
+          const needle = String(f.value).toLowerCase();
+          if (Array.isArray(val)) {
+            matched = val.some((v) => String(v).toLowerCase().includes(needle));
+          } else {
+            matched = String(val).toLowerCase().includes(needle);
+          }
+        }
+      }
+      if (f.excluded ? matched : !matched) return false;
+    }
+
+    // Excludes (-term / NOT term / quoted)
+    if (parsed.excludes.length) {
+      const text = itemText(item);
+      for (const ex of parsed.excludes) {
+        if (text.includes(ex)) return false;
+      }
+    }
+    // OR groups — at least one term per group must match
+    if (parsed.orGroups.length) {
+      const text = itemText(item);
+      for (const group of parsed.orGroups) {
+        if (!group.some((t) => text.includes(t))) return false;
+      }
+    }
+    return true;
+  });
+
+  // If no free text left, return filtered pool in insertion order
+  if (!parsed.phrases.length) return pool.slice();
+
+  const scored = [];
+  for (const item of pool) {
+    // Every phrase must contribute (AND). Sum the best score across fields for each phrase.
+    let total = 0;
+    let allMatched = true;
+    for (const phrase of parsed.phrases) {
+      let bestForPhrase = 0;
+      for (const fx of textExtractors) {
+        const val = fx.get(item);
+        if (val == null) continue;
+        const weight = fx.weight || 1;
+        if (Array.isArray(val)) {
+          for (const v of val) {
+            const s = searchScore(phrase, v) * weight;
+            if (s > bestForPhrase) bestForPhrase = s;
+          }
+        } else {
+          const s = searchScore(phrase, val) * weight;
+          if (s > bestForPhrase) bestForPhrase = s;
+        }
+      }
+      if (bestForPhrase === 0) { allMatched = false; break; }
+      total += bestForPhrase;
+    }
+    if (allMatched && total > 0) scored.push({ item, score: total });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => s.item);
+}
+
+// highlightMatch(text, query) → HTML with <mark> around matched parts.
+// Handles: substring, multi-word tokens, and fuzzy subsequence highlighting.
+// Falls back to plain escaped text if no match.
+function highlightMatch(text, query) {
+  if (!text) return "";
+  const safe = escHtml(text);
+  const q = String(query || "").toLowerCase().trim();
+  if (!q) return safe;
+  const t = String(text);
+  const tl = t.toLowerCase();
+
+  // Prefer substring highlight
+  let idx = tl.indexOf(q);
+  if (idx >= 0) {
+    return (
+      escHtml(t.slice(0, idx)) +
+      '<mark class="search-hl">' +
+      escHtml(t.slice(idx, idx + q.length)) +
+      "</mark>" +
+      escHtml(t.slice(idx + q.length))
+    );
+  }
+
+  // Multi-word token highlight (space-separated phrases)
+  const tokens = q.split(/\s+/).filter((x) => x.length > 1);
+  let ranges = [];
+  for (const tok of tokens) {
+    let from = 0;
+    while (from < tl.length) {
+      const i = tl.indexOf(tok, from);
+      if (i < 0) break;
+      ranges.push([i, i + tok.length]);
+      from = i + tok.length;
+    }
+  }
+  if (ranges.length) return _applyHighlightRanges(t, ranges);
+
+  // Fuzzy subsequence highlight: mark each matching char
+  // Only if the full query (no spaces) has length ≥ 3 and all chars appear in order
+  const flat = q.replace(/\s+/g, "");
+  if (flat.length >= 3) {
+    const charRanges = [];
+    let i = 0;
+    for (let j = 0; j < t.length && i < flat.length; j++) {
+      if (tl[j] === flat[i]) {
+        charRanges.push([j, j + 1]);
+        i++;
+      }
+    }
+    if (i === flat.length) return _applyHighlightRanges(t, charRanges);
+  }
+
+  return safe;
+}
+
+// Per-portion nutrition lookup for searchItems filter extractors.
+// Safe to call even if nutrition is missing — returns NaN (filter will skip).
+function _recipeNutrPerPortion(recipe, field) {
+  try {
+    const total = recipeNutritionTotal(recipe);
+    if (!total) return NaN;
+    const portions = recipe.portions || 1;
+    const v = total[field];
+    if (v == null || isNaN(v)) return NaN;
+    return v / portions;
+  } catch {
+    return NaN;
+  }
+}
+
+// didYouMean(query, candidates) → best loose suggestion or null.
+// Uses fuzzy subsequence matching with relaxed thresholds for typo recovery.
+function didYouMean(query, candidates) {
+  const q = String(query || "").toLowerCase().trim();
+  if (q.length < 3) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const c of candidates) {
+    if (!c) continue;
+    const text = String(c).toLowerCase();
+    if (text === q) return null; // exact match exists, no need to suggest
+    // Score: substring > subsequence > char-overlap
+    let score = 0;
+    if (text.includes(q)) score = 1000;
+    else {
+      // Subsequence match
+      let i = 0;
+      for (let j = 0; j < text.length && i < q.length; j++) {
+        if (text[j] === q[i]) i++;
+      }
+      if (i === q.length) score = 500 + (200 - Math.min(text.length, 200));
+      else {
+        // Levenshtein-lite: count shared chars
+        const qChars = new Set(q);
+        let shared = 0;
+        for (const ch of text) if (qChars.has(ch)) shared++;
+        if (shared >= q.length - 1 && Math.abs(text.length - q.length) <= 3) {
+          score = 100 + shared;
+        }
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return bestScore > 100 ? best : null;
+}
+
+// Build a friendly empty-state block for list views (recipe list, ingredient lib).
+// Shows: "no results for X" + did-you-mean + clear-filters + tip.
+function _buildListEmptyState(opts) {
+  const q = opts.searchValue || "";
+  const suggestion = q
+    ? didYouMean(
+        (parseSearchQuery(q).phrases || []).join(" ") || q,
+        opts.candidateNames || [],
+      )
+    : null;
+  const dym =
+    suggestion && suggestion.toLowerCase() !== q.toLowerCase()
+      ? `<div style="margin-top:8px;font-size:13px;color:var(--text-secondary)">Did you mean <a href="#" onclick="event.preventDefault();const i=document.getElementById('${opts.searchInputId}');i.value='${escAttr(suggestion)}';i.dispatchEvent(new Event('input'))" style="color:var(--accent);font-weight:600">${escHtml(suggestion)}</a>?</div>`
+      : "";
+
+  const buttons = [];
+  if (q) {
+    buttons.push(
+      `<button class="btn-secondary btn-sm" onclick="const i=document.getElementById('${opts.searchInputId}');i.value='';i.dispatchEvent(new Event('input'))">✕ Clear search</button>`,
+    );
+  }
+  if (opts.hasOtherFilters) {
+    buttons.push(
+      `<button class="btn-secondary btn-sm" onclick="${opts.clearAllFn}">✕ Clear all filters</button>`,
+    );
+  }
+  const btnRow = buttons.length
+    ? `<div style="margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">${buttons.join("")}</div>`
+    : "";
+
+  const headline = q
+    ? `No ${opts.itemType} match "<strong style="color:var(--text-primary)">${escHtml(q)}</strong>"`
+    : `No ${opts.itemType} match your filters`;
+
+  const tip = q
+    ? `<div style="margin-top:14px;font-size:11px;color:var(--text-muted)">Tip: try <code>cat:dairy</code>, <code>#vegan</code>, <code>&gt;5</code>, <code>"exact phrase"</code>, or <code>-exclude</code></div>`
+    : "";
+
+  return `<div style="padding:60px 24px;text-align:center">
+    <div style="font-size:48px;opacity:.3;margin-bottom:12px">🔎</div>
+    <div style="font-size:15px;color:var(--text-muted)">${headline}</div>
+    ${dym}
+    ${btnRow}
+    ${tip}
+  </div>`;
+}
+
+// Clear every filter on the recipe list (search, category, GP, supplier, tags)
+function clearAllRecipeFilters() {
+  const s = document.getElementById("rl-search");
+  if (s) s.value = "";
+  const c = document.getElementById("rl-cat");
+  if (c) c.value = "";
+  const g = document.getElementById("rl-gp");
+  if (g) g.value = "";
+  const sup = document.getElementById("rl-supplier");
+  if (sup) sup.value = "";
+  _rlTagFilters.clear();
+  try { sessionStorage.removeItem("rc-search-q-rl"); } catch {}
+  renderRecipeList();
+}
+
+// Clear every filter on the ingredient library
+function clearAllIngFilters() {
+  const s = document.getElementById("ing-search");
+  if (s) s.value = "";
+  const a = document.getElementById("ing-allergen-filter");
+  if (a) a.value = "";
+  const seas = document.getElementById("ing-seasonal-filter");
+  if (seas) seas.checked = false;
+  window._ingCatFilterType = "all";
+  window._ingCatFilter = "";
+  try { sessionStorage.removeItem("rc-search-q-ing"); } catch {}
+  renderIngredientLibrary();
+}
+
+// Build a snippet around a match in long text (e.g. recipe notes)
+function makeSnippet(text, query, maxLen) {
+  if (!text) return "";
+  const t = String(text);
+  const q = String(query || "").toLowerCase();
+  const max = maxLen || 80;
+  if (!q) return t.length > max ? t.slice(0, max) + "…" : t;
+  const idx = t.toLowerCase().indexOf(q);
+  if (idx < 0) return t.length > max ? t.slice(0, max) + "…" : t;
+  const start = Math.max(0, idx - 20);
+  const end = Math.min(t.length, idx + q.length + max - 20);
+  return (
+    (start > 0 ? "…" : "") +
+    t.slice(start, end).trim() +
+    (end < t.length ? "…" : "")
+  );
+}
+
+function _applyHighlightRanges(t, ranges) {
+  ranges.sort((a, b) => a[0] - b[0]);
+  // Merge overlaps / adjacent
+  const merged = [ranges[0]];
+  for (let k = 1; k < ranges.length; k++) {
+    const last = merged[merged.length - 1];
+    if (ranges[k][0] <= last[1]) last[1] = Math.max(last[1], ranges[k][1]);
+    else merged.push(ranges[k]);
+  }
+  let out = "";
+  let pos = 0;
+  for (const [a, b] of merged) {
+    out += escHtml(t.slice(pos, a));
+    out += '<mark class="search-hl">' + escHtml(t.slice(a, b)) + "</mark>";
+    pos = b;
+  }
+  out += escHtml(t.slice(pos));
+  return out;
 }
 
 function costPerUnit(ing) {
@@ -2133,6 +3063,7 @@ let _recVirtualList = [];
 let _recRenderedTo = 0;
 
 function _recBuildItem(item) {
+  const _hlQ = (document.getElementById("rl-search")?.value || "").toLowerCase().replace(/^#/, "");
   if (item.type === "header") {
     const { cat, count, collapsed } = item;
     return `<tr class="rl-grp-hdr" onclick="toggleRlGroup('${escHtml(cat).replace(/'/g, "\\'")}' )" style="cursor:pointer" title="Click to collapse">
@@ -2172,7 +3103,7 @@ function _recBuildItem(item) {
       </td>
       <td class="rl-dot-cell"><span class="rl-dot" style="background:${dotCol}"></span></td>
       <td class="rl-name-cell">
-        <div class="rl-name">${escHtml(r.name)}${lockIcon}${r.pricedFlag ? ' <span style="font-size:9px;font-weight:700;color:var(--green);background:rgba(76,175,125,0.12);border:1px solid rgba(76,175,125,0.3);border-radius:3px;padding:1px 5px;vertical-align:middle">✓ PRICED</span>' : ""}${staleBadge}</div>
+        <div class="rl-name">${highlightMatch(r.name, _hlQ)}${lockIcon}${r.pricedFlag ? ' <span style="font-size:9px;font-weight:700;color:var(--green);background:rgba(76,175,125,0.12);border:1px solid rgba(76,175,125,0.3);border-radius:3px;padding:1px 5px;vertical-align:middle">✓ PRICED</span>' : ""}${staleBadge}</div>
         <div class="rl-sub">${r.ingredients.length} ingredient${r.ingredients.length !== 1 ? "s" : ""}${(r.methods || []).length ? " · " + r.methods.length + " steps" : ""}${timeInfo ? " · " + timeInfo : ""}${r.tags?.length ? " · " + r.tags.map((t) => "#" + t).join(" ") : ""}${r.lastEdited ? " · edited " + timeAgo(r.lastEdited) : ""}</div>
       </td>
       <td class="rl-portions-cell">${r.portions || 1}</td>
@@ -2310,18 +3241,14 @@ function renderRecipeList() {
   const supplierFilter = document.getElementById("rl-supplier")?.value || "";
   let recipes = state.recipes.filter((r) => !r.yieldQty);
   if (searchVal) {
-    // Support #tag search
-    const tagSearch = searchVal.startsWith("#") ? searchVal.slice(1) : null;
-    recipes = recipes.filter((r) => {
-      if (tagSearch)
-        return (r.tags || []).some((t) => t.toLowerCase().includes(tagSearch));
-      return (
-        r.name.toLowerCase().includes(searchVal) ||
-        (r.category || "").toLowerCase().includes(searchVal) ||
-        (r.notes || "").toLowerCase().includes(searchVal) ||
-        (r.tags || []).some((t) => t.toLowerCase().includes(searchVal))
-      );
-    });
+    // Smart search: fuzzy + multi-word + ranked + field prefixes (cat:, #tag, >price)
+    recipes = searchItems(searchVal, recipes, [
+      { weight: 3, get: (r) => r.name },
+      { key: "cat", weight: 2, get: (r) => r.category || "" },
+      { key: "tag", weight: 2, get: (r) => r.tags || [] },
+      { weight: 1, get: (r) => r.notes || "" },
+      { key: "num", searchable: false, get: (r) => r.priceOverride || 0 },
+    ]);
   }
   if (supplierFilter) {
     recipes = recipes.filter((r) =>
@@ -2390,8 +3317,8 @@ function renderRecipeList() {
       tagBar.style.display = "none";
     }
   }
-  // Sort
-  recipes = [...recipes].sort((a, b) => {
+  // Sort — but skip sort when a search query is active so relevance ranking wins
+  if (!searchVal) recipes = [...recipes].sort((a, b) => {
     if (sortVal === "name") return a.name.localeCompare(b.name);
     if (sortVal === "cat")
       return (a.category || "").localeCompare(b.category || "");
@@ -2433,20 +3360,32 @@ function renderRecipeList() {
   }).length;
   const unpriced = allRecipes.filter((r) => !r.priceOverride).length;
 
-  // Update stat chips
+  // Update stat chips (show filtered count when a search is active)
   const statsEl = document.getElementById("rl-stats");
-  if (statsEl)
+  if (statsEl) {
+    const countLabel =
+      searchVal && recipes.length !== allRecipes.length
+        ? `<div class="rl-chip" style="color:var(--accent);font-weight:700">${recipes.length} of ${allRecipes.length}</div>`
+        : `<div class="rl-chip">${allRecipes.length} recipe${allRecipes.length !== 1 ? "s" : ""}</div>`;
     statsEl.innerHTML = `
-    <div class="rl-chip">${allRecipes.length} recipe${allRecipes.length !== 1 ? "s" : ""}</div>
+    ${countLabel}
     <div class="rl-chip rl-chip-ok">${priced} priced</div>
     <div class="rl-chip rl-chip-ok">${onTarget} on target</div>
     ${overTgt ? `<div class="rl-chip rl-chip-warn">${overTgt} over target</div>` : ""}
     ${unpriced ? `<div class="rl-chip rl-chip-none">${unpriced} no price</div>` : ""}
   `;
+  }
 
   // Group by category
   if (!recipes.length) {
-    container.innerHTML = `<div style="padding:60px;text-align:center;color:var(--text-muted)">No recipes match your filters</div>`;
+    container.innerHTML = _buildListEmptyState({
+      searchValue: searchVal,
+      searchInputId: "rl-search",
+      candidateNames: state.recipes.map((r) => r.name),
+      hasOtherFilters: !!(catFilter || gpFilter || supplierFilter || _rlTagFilters.size),
+      clearAllFn: "clearAllRecipeFilters()",
+      itemType: "recipes",
+    });
     return;
   }
 
@@ -3696,12 +4635,14 @@ function renderSidebarRecipes() {
     recipes = recipes.filter(
       (r) => (r.category || "").toLowerCase() === catFilter.toLowerCase(),
     );
-  if (sidebarQ)
-    recipes = recipes.filter(
-      (r) =>
-        r.name.toLowerCase().includes(sidebarQ) ||
-        (r.tags || []).some((t) => t.toLowerCase().includes(sidebarQ)),
-    );
+  if (sidebarQ) {
+    recipes = searchItems(sidebarQ, recipes, [
+      { weight: 3, get: (r) => r.name },
+      { key: "cat", weight: 2, get: (r) => r.category || "" },
+      { key: "tag", weight: 2, get: (r) => r.tags || [] },
+      { key: "num", searchable: false, get: (r) => r.priceOverride || 0 },
+    ]);
+  }
 
   if (!recipes.length) {
     container.innerHTML = `<div style="padding:8px 16px;color:var(--text-muted);font-size:12px">${catFilter ? "No recipes in this category" : "No recipes yet"}</div>`;
@@ -4316,8 +5257,15 @@ function renderRecipeEditor() {
       <div class="ingredients-panel">
         <div class="panel-heading">
           <h3>Ingredients</h3>
-          <span style="font-size:12px;color:var(--text-muted)">${recipe.ingredients.length} items · drag to reorder</span>
+          <span id="recipe-ing-count" style="font-size:12px;color:var(--text-muted)">${recipe.ingredients.length} items · drag to reorder</span>
         </div>
+        ${recipe.ingredients.length > 8 ? `
+        <div style="position:relative;margin:0 0 8px">
+          <input type="text" id="recipe-ing-search" placeholder="🔎 Filter ingredients in this recipe…"
+            oninput="debouncedSearch('recing', _filterRecipeIngredients)"
+            style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:6px 10px;border-radius:5px;outline:none;box-sizing:border-box">
+        </div>
+        ` : ""}
 
         <table class="recipe-ing-table">
           <thead>
@@ -4482,6 +5430,8 @@ function renderRecipeEditor() {
   `;
 
   initDragDrop();
+  // Enhance the in-recipe ingredient filter input (Esc clear, × button)
+  enhanceSearchInput("recipe-ing-search", "recing", () => debouncedSearch("recing", _filterRecipeIngredients));
 }
 
 function renderIngRow(ri, idx, scale = 1) {
@@ -5296,6 +6246,43 @@ function updateGP(gp) {
   save();
 }
 
+function _filterRecipeIngredients() {
+  const input = document.getElementById("recipe-ing-search");
+  if (!input) return;
+  const q = input.value.trim().toLowerCase();
+  const recipe = getActiveRecipe();
+  if (!recipe) return;
+  const rows = document.querySelectorAll("#recipe-ing-tbody tr");
+  let shown = 0;
+  rows.forEach((row, idx) => {
+    const ri = recipe.ingredients[idx];
+    if (!ri) return;
+    const ing = state.ingredients.find((i) => i.id === ri.ingId);
+    if (!q) {
+      row.style.display = "";
+      shown++;
+      return;
+    }
+    const name = (ing?.name || "").toLowerCase();
+    const cat = (ing?.category || "").toLowerCase();
+    const match =
+      searchScore(q, name) > 0 ||
+      searchScore(q, cat) > 0;
+    row.style.display = match ? "" : "none";
+    if (match) shown++;
+  });
+  const countEl = document.getElementById("recipe-ing-count");
+  if (countEl) {
+    if (q && shown !== recipe.ingredients.length) {
+      countEl.textContent = `${shown} of ${recipe.ingredients.length} items · drag to reorder`;
+      countEl.style.color = "var(--accent)";
+    } else {
+      countEl.textContent = `${recipe.ingredients.length} items · drag to reorder`;
+      countEl.style.color = "var(--text-muted)";
+    }
+  }
+}
+
 function refreshCostPanel() {
   const recipe = getActiveRecipe();
   if (!recipe) return;
@@ -5812,17 +6799,15 @@ function showIngDropdown(query) {
     dropdown.innerHTML = "";
     return;
   }
-  const matches = state.ingredients
-    .filter(
-      (i) =>
-        i.name.toLowerCase().includes(q) ||
-        (i.category || "").toLowerCase().includes(q) ||
-        (i.supplierId &&
-          (state.suppliers.find((s) => s.id === i.supplierId)?.name || "")
-            .toLowerCase()
-            .includes(q)),
-    )
-    .slice(0, 12);
+  const matches = searchItems(q, state.ingredients, [
+    { weight: 3, get: (i) => i.name },
+    { weight: 2, get: (i) => i.category || "" },
+    { weight: 2, get: (i) =>
+        i.supplierId
+          ? (state.suppliers.find((s) => s.id === i.supplierId)?.name || "")
+          : ""
+    },
+  ]).slice(0, 12);
 
   const html = matches.length
     ? matches
@@ -5832,8 +6817,8 @@ function showIngDropdown(query) {
           return `<div class="ing-dd-item"
           onmousedown="event.preventDefault();addIngredientToRecipe('${ing.id}')">
           <div class="ing-dd-info" style="flex:1;min-width:0">
-            <div class="dd-name">${escHtml(ing.name)}${hasAllergens ? ` <span style="color:var(--accent);font-size:10px" title="${escHtml((ing.allergens || []).join(", "))}">⚠</span>` : ""}</div>
-            <div class="dd-cost">${escHtml(ing.category || "Other")} · ${fmt(cpu)}/${ing.unit}</div>
+            <div class="dd-name">${highlightMatch(ing.name, q)}${hasAllergens ? ` <span style="color:var(--accent);font-size:10px" title="${escHtml((ing.allergens || []).join(", "))}">⚠</span>` : ""}</div>
+            <div class="dd-cost">${highlightMatch(ing.category || "Other", q)} · ${fmt(cpu)}/${ing.unit}</div>
           </div>
           <button class="ing-dd-add-btn" title="Add and keep searching"
             onmousedown="event.preventDefault();event.stopPropagation();addIngAndStay('${ing.id}')">+</button>
@@ -6704,6 +7689,7 @@ let _ingRenderedTo = 0; // how many rows are currently in the DOM
 function _ingBuildRow(ing) {
   const cpu = costPerUnit(ing);
   const al = ing.allergens || [];
+  const _hlQ = (document.getElementById("ing-search")?.value || "").toLowerCase();
   const hist = ing.priceHistory || [];
   const lastUpdated = (() => {
     if (!hist.length)
@@ -6724,8 +7710,8 @@ function _ingBuildRow(ing) {
       <input type="checkbox" class="ing-row-check" data-id="${ing.id}" onchange="onIngCheckChange()"
         style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent)" />
     </td>
-    <td style="font-weight:600;cursor:pointer" onclick="openIngredientModal('${ing.id}')" title="Edit ingredient" class="ing-name-cell">${escHtml(ing.name)}</td>
-    <td><span class="cat-badge">${escHtml(ing.category)}</span></td>
+    <td style="font-weight:600;cursor:pointer" onclick="openIngredientModal('${ing.id}')" title="Edit ingredient" class="ing-name-cell">${highlightMatch(ing.name, _hlQ)}</td>
+    <td><span class="cat-badge">${highlightMatch(ing.category, _hlQ)}</span></td>
     <td>${ing.packSize} ${ing.unit}</td>
     <td>
       <span class="ing-price-editable" onclick="openIngPriceEdit('${ing.id}',this)" title="Click to edit price">
@@ -6822,39 +7808,46 @@ function renderIngredientLibrary() {
       }
       return true; // 'all'
     })
-    .filter(
-      (i) =>
-        i.name.toLowerCase().includes(q) ||
-        i.category.toLowerCase().includes(q) ||
-        (i.supplierId &&
-          (state.suppliers.find((s) => s.id === i.supplierId)?.name || "")
-            .toLowerCase()
-            .includes(q)) ||
-        (i.allergens || []).some((a) => a.toLowerCase().includes(q)),
-    )
     .filter((i) => {
       if (allergenFilter === "none") return !(i.allergens || []).length;
       if (allergenFilter) return (i.allergens || []).includes(allergenFilter);
       return true;
     })
     .filter((i) => !seasonalFilter || i.seasonal);
+  // Smart search: fuzzy + multi-word + ranked + field prefixes
+  //   cat:dairy   sup:bidfood   allergen:nuts   >5   "butter tomato"
+  if (q) {
+    filtered = searchItems(q, filtered, [
+      { weight: 3, get: (i) => i.name },
+      { key: "cat", weight: 2, get: (i) => i.category || "" },
+      { key: "sup", weight: 2, get: (i) =>
+          i.supplierId
+            ? (state.suppliers.find((s) => s.id === i.supplierId)?.name || "")
+            : ""
+      },
+      { key: "allergen", weight: 1, get: (i) => i.allergens || [] },
+      { key: "num", searchable: false, get: (i) => costPerUnit(i) },
+    ]);
+  }
 
-  // Update title
+  // Update title — show "X of Y" when a search narrows results
   if (titleEl) {
     const total = filtered.length;
+    const totalAll = state.ingredients.length;
+    const searchSuffix = q && total !== totalAll ? ` (of ${totalAll})` : "";
     if (filterType === "all")
-      titleEl.textContent = total + " ingredient" + (total !== 1 ? "s" : "");
+      titleEl.textContent = total + " ingredient" + (total !== 1 ? "s" : "") + searchSuffix;
     else if (filterType === "cat")
-      titleEl.textContent = filterVal + " · " + total;
+      titleEl.textContent = filterVal + " · " + total + searchSuffix;
     else if (filterType === "sup")
       titleEl.textContent =
         (state.suppliers.find((s) => s.id === filterVal)?.name || "Supplier") +
         " · " +
-        total;
+        total + searchSuffix;
     else if (filterType === "nosup")
-      titleEl.textContent = "No supplier · " + total;
+      titleEl.textContent = "No supplier · " + total + searchSuffix;
     else if (filterType === "stale")
-      titleEl.textContent = "Stale prices · " + total;
+      titleEl.textContent = "Stale prices · " + total + searchSuffix;
   }
 
   // Stale count badge for current view
@@ -6877,7 +7870,8 @@ function renderIngredientLibrary() {
   const dir = sortBy.endsWith("-desc") ? -1 : 1;
   const key = sortBy.replace("-desc", "");
 
-  filtered = filtered.slice().sort((a, b) => {
+  // Skip sort when a search query is active so relevance ranking wins
+  if (!q) filtered = filtered.slice().sort((a, b) => {
     if (key === "name") return dir * a.name.localeCompare(b.name);
     if (key === "category")
       return (
@@ -6903,16 +7897,34 @@ function renderIngredientLibrary() {
     else arrow.textContent = "";
   });
   if (!filtered.length) {
-    tbody.innerHTML = q
-      ? `<tr><td colspan="9">
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 8px">
-            <span style="color:var(--text-muted);font-size:13px">No ingredient found matching "<strong style="color:var(--text-primary)">${escHtml(q)}</strong>"</span>
-            <button class="btn-primary btn-sm" onclick="openIngredientModal(null,'${escHtml(q).replace(/'/g, "\\'")}')">
-              + Add "${escHtml(q)}"
+    if (q) {
+      // Enhanced empty state: did-you-mean + clear filters + add-new
+      const suggestion = didYouMean(
+        (parseSearchQuery(q).phrases || []).join(" ") || q,
+        state.ingredients.map((i) => i.name),
+      );
+      const dym = suggestion && suggestion.toLowerCase() !== q.toLowerCase()
+        ? `<div style="margin-top:6px;font-size:12px;color:var(--text-secondary)">Did you mean <a href="#" onclick="event.preventDefault();document.getElementById('ing-search').value='${escAttr(suggestion)}';renderIngredientLibrary()" style="color:var(--accent);font-weight:600">${escHtml(suggestion)}</a>?</div>`
+        : "";
+      const hasOtherFilters = filterType !== "all" || allergenFilter || seasonalFilter;
+      const clearBtn = hasOtherFilters
+        ? `<button class="btn-secondary btn-sm" onclick="clearAllIngFilters()" style="margin-right:6px">✕ Clear all filters</button>`
+        : "";
+      tbody.innerHTML = `<tr><td colspan="9">
+        <div style="padding:20px 16px;text-align:center">
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:4px">No ingredients match "<strong style="color:var(--text-primary)">${escHtml(q)}</strong>"</div>
+          ${dym}
+          <div style="margin-top:14px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+            ${clearBtn}
+            <button class="btn-primary btn-sm" onclick="openIngredientModal(null,'${escAttr(q)}')">
+              + Add "${escHtml(q)}" to library
             </button>
           </div>
-        </td></tr>`
-      : `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No ingredients found</td></tr>`;
+        </div>
+      </td></tr>`;
+    } else {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No ingredients found</td></tr>`;
+    }
     return;
   }
   _ingVirtualList = filtered;
@@ -10864,12 +11876,13 @@ function renderSupplierList() {
     .toLowerCase()
     .trim();
   const suppliers = q
-    ? state.suppliers.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          (s.contact || "").toLowerCase().includes(q) ||
-          (s.email || "").toLowerCase().includes(q),
-      )
+    ? searchItems(q, state.suppliers, [
+        { weight: 3, get: (s) => s.name },
+        { weight: 2, get: (s) => s.contact || "" },
+        { weight: 2, get: (s) => s.email || "" },
+        { weight: 1, get: (s) => s.phone || "" },
+        { weight: 1, get: (s) => s.notes || "" },
+      ])
     : state.suppliers;
   if (!suppliers.length) {
     container.innerHTML =
@@ -18121,118 +19134,336 @@ function openSearch() {
   searchOpen = true;
   document.getElementById("search-overlay").classList.remove("hidden");
   document.getElementById("global-search-input").value = "";
-  document.getElementById("search-results").innerHTML = "";
+  _renderGlobalSearchEmptyState(document.getElementById("search-results"));
   document.getElementById("global-search-input").focus();
 }
 
 function closeSearch() {
   searchOpen = false;
   document.getElementById("search-overlay").classList.add("hidden");
+  _globalSearchActiveIdx = -1;
+}
+
+let _globalSearchActiveIdx = -1;
+function handleGlobalSearchKey(e) {
+  const results = document.getElementById("search-results");
+  if (!results) return;
+  const items = results.querySelectorAll(".search-result-item");
+
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeSearch();
+    return;
+  }
+  if (!items.length) return;
+
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    _globalSearchActiveIdx = (_globalSearchActiveIdx + 1) % items.length;
+    _highlightGlobalSearchItem(items);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    _globalSearchActiveIdx =
+      _globalSearchActiveIdx <= 0 ? items.length - 1 : _globalSearchActiveIdx - 1;
+    _highlightGlobalSearchItem(items);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    const idx = _globalSearchActiveIdx >= 0 ? _globalSearchActiveIdx : 0;
+    const item = items[idx];
+    if (item) {
+      // Remember the query in history
+      const inp = document.getElementById("global-search-input");
+      if (inp) rememberSearchQuery("global", inp.value);
+      item.click();
+    }
+  }
+}
+function _highlightGlobalSearchItem(items) {
+  items.forEach((el, i) => {
+    if (i === _globalSearchActiveIdx) {
+      el.classList.add("search-hit-active");
+      el.scrollIntoView({ block: "nearest" });
+    } else {
+      el.classList.remove("search-hit-active");
+    }
+  });
 }
 
 function runGlobalSearch() {
-  const q = document
-    .getElementById("global-search-input")
-    .value.toLowerCase()
-    .trim();
+  _globalSearchActiveIdx = -1;
+  const rawQ = document.getElementById("global-search-input").value.trim();
   const results = document.getElementById("search-results");
-  if (!q) {
-    results.innerHTML = "";
+
+  // Empty state — show recent/frequent items as shortcuts
+  if (!rawQ) {
+    _renderGlobalSearchEmptyState(results);
     return;
   }
 
-  const matches = [];
+  const q = rawQ.toLowerCase();
 
-  state.recipes.forEach((r) => {
-    const hits = [];
-    // Name
-    if (r.name.toLowerCase().includes(q))
-      hits.push({ field: "name", text: r.name });
-    // Category
-    if (r.category.toLowerCase().includes(q))
-      hits.push({ field: "category", text: r.category });
-    // Tags
-    (r.tags || []).forEach((t) => {
-      if (t.toLowerCase().includes(q)) hits.push({ field: "tag", text: t });
-    });
-    // Notes
-    if ((r.notes || "").toLowerCase().includes(q)) {
-      const idx = r.notes.toLowerCase().indexOf(q);
-      const snippet = r.notes.substring(Math.max(0, idx - 20), idx + 60).trim();
-      hits.push({ field: "notes", text: "…" + snippet + "…" });
+  // Smart recipe search with prefixes + fuzzy + multi-word
+  const matchedRecipes = searchItems(q, state.recipes, [
+    { weight: 3, get: (r) => r.name },
+    { key: "cat", weight: 2, get: (r) => r.category || "" },
+    { key: "tag", weight: 2, get: (r) => r.tags || [] },
+    { weight: 1, get: (r) => r.notes || "" },
+    // Search ingredient names inside recipes (weight lower so they rank after direct hits)
+    { weight: 1, get: (r) => r.ingredients
+        .map((ri) => state.ingredients.find((i) => i.id === ri.ingId)?.name || "")
+        .filter(Boolean)
+    },
+    { key: "num", searchable: false, get: (r) => r.priceOverride || 0 },
+    // Nutrition filters (per-portion, computed via recipeNutritionTotal)
+    { key: "kcal", searchable: false, get: (r) => _recipeNutrPerPortion(r, "kcal") },
+    { key: "protein", searchable: false, get: (r) => _recipeNutrPerPortion(r, "protein") },
+    { key: "fat", searchable: false, get: (r) => _recipeNutrPerPortion(r, "fat") },
+    { key: "carbs", searchable: false, get: (r) => _recipeNutrPerPortion(r, "carbs") },
+    { key: "sugar", searchable: false, get: (r) => _recipeNutrPerPortion(r, "sugar") },
+    { key: "salt", searchable: false, get: (r) => _recipeNutrPerPortion(r, "salt") },
+  ]).slice(0, 20);
+
+  // Smart ingredient search
+  const matchedIngs = searchItems(q, state.ingredients, [
+    { weight: 3, get: (i) => i.name },
+    { key: "cat", weight: 2, get: (i) => i.category || "" },
+    { key: "sup", weight: 2, get: (i) =>
+        i.supplierId
+          ? (state.suppliers.find((s) => s.id === i.supplierId)?.name || "")
+          : ""
+    },
+    { key: "allergen", weight: 1, get: (i) => i.allergens || [] },
+    { key: "num", searchable: false, get: (i) => costPerUnit(i) },
+    // Nutrition on raw ingredient (per 100g as stored)
+    { key: "kcal", searchable: false, get: (i) => i.nutrition?.kcal },
+    { key: "protein", searchable: false, get: (i) => i.nutrition?.protein },
+    { key: "fat", searchable: false, get: (i) => i.nutrition?.fat },
+    { key: "carbs", searchable: false, get: (i) => i.nutrition?.carbs },
+    { key: "sugar", searchable: false, get: (i) => i.nutrition?.sugar },
+    { key: "salt", searchable: false, get: (i) => i.nutrition?.salt },
+  ]).slice(0, 10);
+
+  if (!matchedRecipes.length && !matchedIngs.length) {
+    // Did-you-mean: only when the user typed an actual free-text phrase.
+    // A pure filter query like "protein:>30" has no phrases → no suggestion.
+    const parsedQ = parseSearchQuery(rawQ);
+    const phrasesOnly = (parsedQ.phrases || []).join(" ").trim();
+    let dymHtml = "";
+    if (phrasesOnly && phrasesOnly.length >= 3) {
+      const candidates = [
+        ...state.recipes.map((r) => r.name),
+        ...state.ingredients.map((i) => i.name),
+      ];
+      const suggestion = didYouMean(phrasesOnly, candidates);
+      if (suggestion && suggestion.toLowerCase() !== phrasesOnly.toLowerCase()) {
+        // Replace only the phrase part in the original query
+        const newQuery = rawQ.replace(phrasesOnly, suggestion);
+        dymHtml = `<div style="margin-top:12px;font-size:12px;color:var(--text-secondary)">Did you mean <a href="#" onclick="event.preventDefault();const i=document.getElementById('global-search-input');i.value='${escAttr(newQuery)}';runGlobalSearch()" style="color:var(--accent);font-weight:600">${escHtml(suggestion)}</a>?</div>`;
+      }
     }
-    // Ingredients used
-    r.ingredients.forEach((ri) => {
-      const ing = state.ingredients.find((i) => i.id === ri.ingId);
-      if (ing && ing.name.toLowerCase().includes(q))
-        hits.push({ field: "ingredient", text: ing.name });
-    });
-    if (hits.length) matches.push({ r, hits });
-  });
-
-  // Also search ingredients library directly
-  const ingMatches = state.ingredients
-    .filter(
-      (i) =>
-        i.name.toLowerCase().includes(q) ||
-        i.category.toLowerCase().includes(q),
-    )
-    .slice(0, 5);
-
-  if (!matches.length && !ingMatches.length) {
     results.innerHTML =
       '<div style="color:var(--text-muted);padding:24px;text-align:center;font-size:13px">No results for "' +
-      escHtml(q) +
-      '"</div>';
+      escHtml(rawQ) +
+      '"' + dymHtml +
+      '<br><span style="font-size:11px;display:block;margin-top:10px">Try: <code>cat:dairy</code>, <code>#vegan</code>, <code>&gt;5</code>, <code>"exact phrase"</code>, <code>-exclude</code></span></div>';
     return;
   }
 
+  // Track the free-text portion for highlighting (strip prefixes)
+  const hlQ = (parseSearchQuery(q).phrases || []).join(" ") || q;
+
   let html = "";
-  if (matches.length) {
+  if (matchedRecipes.length) {
     html +=
       '<div class="search-section-title">Recipes (' +
-      matches.length +
+      matchedRecipes.length +
       ")</div>";
-    html += matches
-      .map(({ r, hits }) => {
+    html += matchedRecipes
+      .map((r) => {
         const cost = recipeTotalCost(r) / (r.portions || 1);
         const price = r.priceOverride || suggestPrice(cost, state.activeGP);
-        const hitBadges = [...new Set(hits.map((h) => h.field))]
-          .map((f) => `<span class="search-hit-badge">${f}</span>`)
-          .join("");
-        const snippet = hits.find((h) => h.field !== "name")?.text || "";
-        return `<div class="search-result-item" onclick="closeSearch();showView('recipes');selectRecipe('${r.id}')">
+        // Notes snippet — only if the query matches in notes (and not already in name/category)
+        let snippetHtml = "";
+        if (hlQ && r.notes && r.notes.toLowerCase().includes(hlQ.toLowerCase()) && !r.name.toLowerCase().includes(hlQ.toLowerCase())) {
+          const snip = makeSnippet(r.notes, hlQ, 100);
+          snippetHtml = `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic">📝 ${highlightMatch(snip, hlQ)}</div>`;
+        }
+        return `<div class="search-result-item" onclick="closeSearch();showView('recipes');selectRecipe('${r.id}');_rememberSearchHit('recipe','${r.id}')">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div style="font-weight:700;font-size:14px">${escHtml(r.name)}</div>
+          <div style="font-weight:700;font-size:14px">${highlightMatch(r.name, hlQ)}</div>
           <div style="font-size:13px;color:var(--accent);font-weight:700">${fmt(price)}</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
-          <span class="cat-badge" style="font-size:10px">${escHtml(r.category)}</span>
-          ${hitBadges}
-          ${snippet ? `<span style="font-size:11px;color:var(--text-muted);font-style:italic">${escHtml(snippet.substring(0, 60))}</span>` : ""}
+          <span class="cat-badge" style="font-size:10px">${highlightMatch(r.category, hlQ)}</span>
+          ${(r.tags || []).slice(0, 3).map((t) => `<span class="search-hit-badge">#${highlightMatch(t, hlQ)}</span>`).join("")}
         </div>
+        ${snippetHtml}
       </div>`;
       })
       .join("");
   }
 
-  if (ingMatches.length) {
+  if (matchedIngs.length) {
     html +=
       '<div class="search-section-title" style="margin-top:12px">Ingredients (' +
-      ingMatches.length +
+      matchedIngs.length +
       ")</div>";
-    html += ingMatches
+    html += matchedIngs
       .map(
         (i) =>
-          `<div class="search-result-item" onclick="closeSearch();showView('ingredients');setTimeout(()=>{const s=document.getElementById('ing-search');if(s){s.value='${escHtml(i.name)}';renderIngredientLibrary();}},100)">
-        <div style="font-weight:600">${escHtml(i.name)}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(i.category)} · ${fmt(costPerUnit(i))} / ${i.unit}</div>
+          `<div class="search-result-item" onclick="closeSearch();showView('ingredients');_rememberSearchHit('ingredient','${i.id}');setTimeout(()=>{const s=document.getElementById('ing-search');if(s){s.value='${escAttr(i.name)}';renderIngredientLibrary();}},100)">
+        <div style="font-weight:600">${highlightMatch(i.name, hlQ)}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${highlightMatch(i.category, hlQ)} · ${fmt(costPerUnit(i))} / ${i.unit}</div>
       </div>`,
       )
       .join("");
   }
 
   results.innerHTML = html;
+}
+
+// ─── Global search: recent/frequent items on empty query ──────────────────
+function _getSearchRecents() {
+  try {
+    return JSON.parse(localStorage.getItem("rc-search-recents") || "[]");
+  } catch { return []; }
+}
+function _rememberSearchHit(kind, id) {
+  try {
+    const recents = _getSearchRecents();
+    const key = kind + ":" + id;
+    const existing = recents.find((r) => r.key === key);
+    if (existing) {
+      existing.count = (existing.count || 1) + 1;
+      existing.ts = Date.now();
+    } else {
+      recents.push({ key, kind, id, count: 1, ts: Date.now() });
+    }
+    // Keep top 30
+    recents.sort((a, b) => (b.count - a.count) || (b.ts - a.ts));
+    localStorage.setItem("rc-search-recents", JSON.stringify(recents.slice(0, 30)));
+  } catch {}
+}
+// ─── Saved searches / presets (cross-session, in localStorage) ─────────────
+function getSavedSearches() {
+  try { return JSON.parse(localStorage.getItem("rc-saved-searches") || "[]"); }
+  catch { return []; }
+}
+function saveCurrentSearch() {
+  const inp = document.getElementById("global-search-input");
+  if (!inp || !inp.value.trim()) {
+    showToast("Type a query first", "info", 1500);
+    return;
+  }
+  const query = inp.value.trim();
+  const name = prompt("Name this search:", query.slice(0, 40));
+  if (!name) return;
+  const list = getSavedSearches();
+  // Replace if same name
+  const filtered = list.filter((s) => s.name !== name);
+  filtered.unshift({ name: name.trim(), query, ts: Date.now() });
+  try { localStorage.setItem("rc-saved-searches", JSON.stringify(filtered.slice(0, 30))); } catch {}
+  showToast("✓ Saved: " + name, "success", 2000);
+  // Re-render so the new preset shows up
+  if (!inp.value) _renderGlobalSearchEmptyState(document.getElementById("search-results"));
+}
+function deleteSavedSearch(name) {
+  const list = getSavedSearches().filter((s) => s.name !== name);
+  try { localStorage.setItem("rc-saved-searches", JSON.stringify(list)); } catch {}
+  _renderGlobalSearchEmptyState(document.getElementById("search-results"));
+}
+function runSavedSearch(query) {
+  const inp = document.getElementById("global-search-input");
+  if (!inp) return;
+  inp.value = query;
+  inp.focus();
+  runGlobalSearch();
+}
+
+function _renderGlobalSearchEmptyState(results) {
+  const recents = _getSearchRecents();
+  const items = [];
+  for (const rec of recents.slice(0, 5)) {
+    if (rec.kind === "recipe") {
+      const r = state.recipes.find((x) => x.id === rec.id);
+      if (r) items.push({ kind: "recipe", obj: r });
+    } else if (rec.kind === "ingredient") {
+      const i = state.ingredients.find((x) => x.id === rec.id);
+      if (i) items.push({ kind: "ingredient", obj: i });
+    }
+  }
+
+  const saved = getSavedSearches();
+  const history = getSearchHistory("global");
+
+  let html = "";
+
+  // Saved presets
+  if (saved.length) {
+    html += '<div class="search-section-title">⭐ Saved searches</div>';
+    html += '<div style="padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px">';
+    for (const s of saved.slice(0, 12)) {
+      html +=
+        `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 4px 4px 10px;background:var(--accent-bg);border:1px solid var(--accent-dim);border-radius:14px;font-size:11px;color:var(--accent);cursor:pointer" onclick="runSavedSearch('${escAttr(s.query)}')" title="${escAttr(s.query)}">` +
+        escHtml(s.name) +
+        `<button style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:0 4px;font-size:14px;line-height:1" onclick="event.stopPropagation();deleteSavedSearch('${escAttr(s.name)}')" title="Remove">×</button>` +
+        "</span>";
+    }
+    html += "</div>";
+  }
+
+  // Recently used items
+  if (items.length) {
+    html += '<div class="search-section-title" style="margin-top:8px">⏱ Recently opened</div>';
+    for (const it of items) {
+      if (it.kind === "recipe") {
+        const r = it.obj;
+        const cost = recipeTotalCost(r) / (r.portions || 1);
+        const price = r.priceOverride || suggestPrice(cost, state.activeGP);
+        html += `<div class="search-result-item" onclick="closeSearch();showView('recipes');selectRecipe('${r.id}');_rememberSearchHit('recipe','${r.id}')">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:700;font-size:14px">${escHtml(r.name)}</div>
+            <div style="font-size:13px;color:var(--accent);font-weight:700">${fmt(price)}</div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(r.category || "Uncategorised")}</div>
+        </div>`;
+      } else {
+        const i = it.obj;
+        html += `<div class="search-result-item" onclick="closeSearch();showView('ingredients');_rememberSearchHit('ingredient','${i.id}')">
+          <div style="font-weight:600">${escHtml(i.name)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(i.category)} · ${fmt(costPerUnit(i))} / ${i.unit}</div>
+        </div>`;
+      }
+    }
+  }
+
+  // Recent queries (history)
+  if (history.length) {
+    html += '<div class="search-section-title" style="margin-top:8px">🕘 Recent queries</div>';
+    html += '<div style="padding:6px 12px;display:flex;flex-wrap:wrap;gap:5px">';
+    for (const q of history.slice(0, 8)) {
+      html +=
+        `<span style="display:inline-block;padding:4px 10px;background:var(--bg-card2);border:1px solid var(--border);border-radius:14px;font-size:11px;color:var(--text-secondary);cursor:pointer;font-family:monospace" onclick="runSavedSearch('${escAttr(q)}')">` +
+        escHtml(q) +
+        "</span>";
+    }
+    html += "</div>";
+  }
+
+  const tipHtml =
+    '<div style="padding:12px 16px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);line-height:1.7;margin-top:8px">' +
+    '<b style="color:var(--text-secondary)">Tips:</b> ' +
+    '<code>cat:dairy</code> · <code>sup:bidfood</code> · <code>#vegan</code> · <code>allergen:nuts</code> · <code>kcal:&lt;500</code> · <code>&gt;5</code> · <code>"exact phrase"</code> · <code>-exclude</code> · <code>beef OR chicken</code> · fuzzy typing (<code>chkn</code>)' +
+    '<br>↑↓ navigate · ↵ open · Esc close' +
+    '</div>';
+
+  if (!html) {
+    results.innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">Start typing to search recipes, ingredients, categories…</div>' +
+      tipHtml;
+    return;
+  }
+  results.innerHTML = html + tipHtml;
 }
 
 // ─── Keyboard Shortcuts Help ───────────────────────────────────
