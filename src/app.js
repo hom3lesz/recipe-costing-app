@@ -7721,6 +7721,7 @@ function _ingBuildRow(ing) {
     <td>${ing.unit}</td>
     <td class="cost-val">${fmt(cpu)}</td>
     <td>${lastUpdated}</td>
+    <td>${al.length ? al.map(a => `<span class="allergen-tag-sm">${escHtml(a)}</span>`).join(" ") : '<span style="color:var(--text-muted);font-size:11px">—</span>'}</td>
     <td style="text-align:right">
       <div style="display:inline-flex;gap:4px;align-items:center">
       <button class="btn-icon" onclick="showPriceHistory('${ing.id}')" title="Price history">
@@ -13682,6 +13683,488 @@ function saveGeneralSettings() {
   // Refresh recipe editor GP if open
   const recipe = getActiveRecipe();
   if (recipe) renderRecipeEditor();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── AI Recipe Scan from Photo ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+let _recipeScanData = null; // holds parsed AI output between scan and apply
+
+function openRecipeScanModal() {
+  _recipeScanData = null;
+  document.getElementById("rscan-status").innerHTML =
+    "Take a photo of a handwritten or printed recipe — the AI will extract ingredients, quantities, and method, then match them to your ingredient library for instant costing.";
+  document.getElementById("rscan-results").classList.add("hidden");
+  document.getElementById("rscan-results").innerHTML = "";
+  document.getElementById("rscan-scan-btn").classList.remove("hidden");
+  document.getElementById("rscan-apply-btn").classList.add("hidden");
+  // Sync model selector with active model
+  const sel = document.getElementById("rscan-model");
+  const saved = getActiveModel();
+  if (sel) sel.value = saved;
+  document.getElementById("recipe-scan-modal").classList.remove("hidden");
+}
+
+function closeRecipeScanModal() {
+  document.getElementById("recipe-scan-modal").classList.add("hidden");
+  _recipeScanData = null;
+}
+
+function _rscanModel() {
+  return document.getElementById("rscan-model")?.value || "claude";
+}
+function _rscanKey() {
+  const model = _rscanModel();
+  return getAiKey(model) || "";
+}
+
+function buildRecipeScanPrompt() {
+  const cats = getIngCategories();
+  const units = ["g", "kg", "ml", "L", "each", "portion", "tbsp", "tsp", "bunch", "pinch", "slice"];
+  return (
+    "This is a photo of a recipe (handwritten, printed, or from a screen). " +
+    "Extract the recipe details and return ONLY valid JSON, no markdown, no explanation.\n\n" +
+    "Return this JSON structure:\n" +
+    JSON.stringify({
+      recipeName: "Name of the dish",
+      category: "Main|Starter|Dessert|Side|Sauce|Soup|Bakery|Drink|Other",
+      portions: 1,
+      notes: "Any method / cooking instructions / chef notes",
+      ingredients: [
+        {
+          name: "ingredient name as written",
+          qty: 0,
+          unit: "g|kg|ml|L|each|portion|tbsp|tsp|bunch|pinch|slice",
+          libraryMatch: null,
+          prepNote: ""
+        }
+      ]
+    }, null, 2) +
+    "\n\nCRITICAL RULES:\n" +
+    "- recipeName: Use the recipe title as written. Clean up capitalisation.\n" +
+    "- category: Must be one of: Main, Starter, Dessert, Side, Sauce, Soup, Bakery, Drink, Other.\n" +
+    "- portions: The number of servings / covers. Default 1 if not stated.\n" +
+    "- notes: Capture ALL cooking method / instructions / tips as a single string. Use newlines (\\n) for steps.\n" +
+    "- ingredients:\n" +
+    "  - name: The ingredient name as written, cleaned up (capitalise first letter, no leading quantities).\n" +
+    "  - qty: Numeric quantity. Convert fractions: ½→0.5, ¼→0.25, ¾→0.75. If \"a pinch\" use 1.\n" +
+    "  - unit: Normalise to one of: " + units.join(", ") + ".\n" +
+    "    Convert: teaspoon→tsp, tablespoon→tbsp, cup→250ml, pint→568ml, litre→L.\n" +
+    "    If the recipe says '2 onions' → qty=2, unit=each.\n" +
+    "    If weight given (200g chicken) → qty=200, unit=g.\n" +
+    "  - prepNote: Capture prep instructions like 'diced', 'finely chopped', 'room temperature'. Empty string if none.\n" +
+    "  - libraryMatch: If the ingredient closely matches one in the library below, return the EXACT library name. Otherwise null.\n" +
+    "\nIngredient library (match against these names):\n" +
+    state.ingredients.map(i => i.name).join("\n") +
+    "\n\nIf the image is unclear or not a recipe, return: {\"error\": \"Could not identify a recipe in this image.\"}"
+  );
+}
+
+async function startRecipeScan() {
+  const results = await browserIPC.openInvoice(); // reuse same file picker (images + PDF)
+  if (!results || !results.length) return;
+
+  const model = _rscanModel();
+  const apiKey = _rscanKey();
+  if (!apiKey) {
+    showToast("No API key set. Go to ⚙ Settings to add your " +
+      (model.startsWith("gemini") ? "Google" : "Anthropic") + " API key.", "error", 4000);
+    return;
+  }
+
+  document.getElementById("rscan-scan-btn").classList.add("hidden");
+  const modelName = model.startsWith("gemini") ? "Gemini" : "Claude";
+
+  // Progress UI
+  const steps = ["Reading image…", "Identifying ingredients…", "Matching to your library…", "Building recipe…"];
+  let _stepIdx = 0;
+  document.getElementById("rscan-status").innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px">' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" style="animation:spin 1s linear infinite;flex-shrink:0"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>' +
+    '<span id="rscan-progress-text" style="font-size:13px;color:var(--text-secondary)">' + steps[0] + '</span>' +
+    '<span style="font-size:11px;color:var(--text-muted);margin-left:4px">via ' + modelName + '</span></div>' +
+    '<div style="margin-top:8px;height:3px;background:var(--bg-card2);border-radius:2px;overflow:hidden">' +
+    '<div id="rscan-progress-bar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.8s ease"></div></div>';
+
+  const _stepInterval = setInterval(function () {
+    _stepIdx = Math.min(_stepIdx + 1, steps.length - 1);
+    const pct = Math.round((_stepIdx / (steps.length - 1)) * 80);
+    const el = document.getElementById("rscan-progress-text");
+    const bar = document.getElementById("rscan-progress-bar");
+    if (el) el.textContent = steps[_stepIdx];
+    if (bar) bar.style.width = pct + "%";
+    if (_stepIdx >= steps.length - 1) clearInterval(_stepInterval);
+  }, 2500);
+
+  try {
+    const prompt = buildRecipeScanPrompt();
+    const files = results.map(r => ({ base64: r.base64, mime: r.mime }));
+    const data = await window.electronAPI.scanInvoice(files, prompt, model, apiKey);
+    clearInterval(_stepInterval);
+
+    const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+    const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+
+    if (parsed.error) {
+      document.getElementById("rscan-progress-bar").style.width = "100%";
+      document.getElementById("rscan-progress-bar").style.background = "var(--red)";
+      document.getElementById("rscan-status").innerHTML =
+        '<div style="color:var(--red);font-size:13px;margin:8px 0">' +
+        '⚠ ' + escHtml(parsed.error) + '</div>';
+      document.getElementById("rscan-scan-btn").classList.remove("hidden");
+      document.getElementById("rscan-scan-btn").textContent = "🔄 Try Another Photo";
+      return;
+    }
+
+    // Complete progress
+    const bar = document.getElementById("rscan-progress-bar");
+    if (bar) bar.style.width = "100%";
+
+    _recipeScanData = parsed;
+    _recipeScanMatchIngredients();
+    renderRecipeScanResults();
+
+  } catch (err) {
+    clearInterval(_stepInterval);
+    document.getElementById("rscan-status").innerHTML =
+      '<div style="color:var(--red);font-size:13px;margin:8px 0">' +
+      '⚠ ' + escHtml(err.message || "Scan failed") + '</div>';
+    document.getElementById("rscan-scan-btn").classList.remove("hidden");
+    document.getElementById("rscan-scan-btn").textContent = "🔄 Try Again";
+  }
+}
+
+// Match each scanned ingredient to the library
+function _recipeScanMatchIngredients() {
+  if (!_recipeScanData || !_recipeScanData.ingredients) return;
+  _recipeScanData.ingredients.forEach(function (item) {
+    // 1. Try the AI's libraryMatch suggestion
+    if (item.libraryMatch) {
+      const exact = state.ingredients.find(i => i.name.toLowerCase() === item.libraryMatch.toLowerCase());
+      if (exact) { item._matchedId = exact.id; item._matchedName = exact.name; return; }
+    }
+    // 2. Fuzzy match by name
+    const lower = item.name.toLowerCase();
+    let bestScore = 0, bestIng = null;
+    state.ingredients.forEach(function (ing) {
+      const ingLower = ing.name.toLowerCase();
+      // Exact
+      if (ingLower === lower) { bestScore = 1000; bestIng = ing; return; }
+      // Contains
+      if (ingLower.includes(lower) || lower.includes(ingLower)) {
+        const lenRatio = Math.min(lower.length, ingLower.length) / Math.max(lower.length, ingLower.length);
+        if (lenRatio > 0.4) {
+          const sc = 500 * lenRatio;
+          if (sc > bestScore) { bestScore = sc; bestIng = ing; }
+        }
+      }
+      // Word overlap
+      const words1 = lower.split(/\s+/);
+      const words2 = ingLower.split(/\s+/);
+      const overlap = words1.filter(w => words2.some(w2 => w2.includes(w) || w.includes(w2))).length;
+      if (overlap > 0) {
+        const sc = 300 * (overlap / Math.max(words1.length, words2.length));
+        if (sc > bestScore) { bestScore = sc; bestIng = ing; }
+      }
+    });
+    if (bestIng && bestScore >= 200) {
+      item._matchedId = bestIng.id;
+      item._matchedName = bestIng.name;
+    } else {
+      item._matchedId = null;
+      item._matchedName = null;
+    }
+  });
+}
+
+function renderRecipeScanResults() {
+  if (!_recipeScanData) return;
+  const d = _recipeScanData;
+  const resultsEl = document.getElementById("rscan-results");
+  resultsEl.classList.remove("hidden");
+  document.getElementById("rscan-apply-btn").classList.remove("hidden");
+
+  document.getElementById("rscan-status").innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;color:var(--green);font-size:13px">' +
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>' +
+    'Recipe extracted — review below and click <strong>Create Recipe</strong></div>';
+
+  // ─── Recipe header ──────────────────────────────────────────
+  let html = '<div style="margin-bottom:16px">';
+  html += '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">';
+  html += '<div class="form-group" style="margin:0;flex:2;min-width:200px"><label style="font-size:11px;color:var(--text-muted)">Recipe Name</label>';
+  html += '<input type="text" id="rscan-name" value="' + escAttr(d.recipeName || "Scanned Recipe") + '" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:14px;font-weight:700;padding:8px 10px;border-radius:5px;outline:none;width:100%;box-sizing:border-box"></div>';
+  html += '<div class="form-group" style="margin:0;flex:1;min-width:120px"><label style="font-size:11px;color:var(--text-muted)">Category</label>';
+  html += '<select id="rscan-category" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;padding:8px 10px;border-radius:5px;outline:none;width:100%;box-sizing:border-box">';
+  const cats = ["Main", "Starter", "Dessert", "Side", "Sauce", "Soup", "Bakery", "Drink", "Other"];
+  cats.forEach(function (c) {
+    html += '<option' + (c === (d.category || "Main") ? ' selected' : '') + '>' + escHtml(c) + '</option>';
+  });
+  html += '</select></div>';
+  html += '<div class="form-group" style="margin:0;width:80px"><label style="font-size:11px;color:var(--text-muted)">Portions</label>';
+  html += '<input type="number" id="rscan-portions" value="' + (d.portions || 1) + '" min="1" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;padding:8px 10px;border-radius:5px;outline:none;width:100%;box-sizing:border-box"></div>';
+  html += '</div></div>';
+
+  // ─── Ingredients table ──────────────────────────────────────
+  const ings = d.ingredients || [];
+  const matched = ings.filter(i => i._matchedId).length;
+  const unmatched = ings.length - matched;
+
+  html += '<div style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">';
+  html += '<div style="font-size:12px;font-weight:700;color:var(--text-primary)">' + ings.length + ' Ingredients</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted)">';
+  html += '<span style="color:var(--green);font-weight:600">' + matched + ' matched</span>';
+  if (unmatched) html += ' · <span style="color:var(--accent);font-weight:600">' + unmatched + ' new</span>';
+  html += '</div></div>';
+
+  html += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm)">';
+  html += '<table class="ing-table" style="margin:0;width:100%"><thead><tr>';
+  html += '<th style="width:28px;text-align:center">✓</th>';
+  html += '<th>Scanned Name</th>';
+  html += '<th>Library Match</th>';
+  html += '<th style="width:70px">Qty</th>';
+  html += '<th style="width:70px">Unit</th>';
+  html += '<th>Prep Note</th>';
+  html += '<th style="width:80px">Cost</th>';
+  html += '</tr></thead><tbody>';
+
+  let totalCost = 0;
+
+  ings.forEach(function (item, idx) {
+    const checked = true;
+    const ing = item._matchedId ? state.ingredients.find(i => i.id === item._matchedId) : null;
+
+    // Calculate cost if matched
+    let costEst = 0;
+    if (ing && ing.packSize > 0 && ing.packCost > 0) {
+      // Convert qty to the ingredient's unit
+      let qtyInBase = item.qty || 0;
+      const iu = (item.unit || "").toLowerCase();
+      const bu = (ing.unit || "").toLowerCase();
+      // Basic conversions
+      if (iu === "kg" && bu === "g") qtyInBase *= 1000;
+      else if (iu === "g" && bu === "kg") qtyInBase /= 1000;
+      else if (iu === "l" && bu === "ml") qtyInBase *= 1000;
+      else if (iu === "ml" && bu === "l") qtyInBase /= 1000;
+      else if (iu === "tbsp" && bu === "ml") qtyInBase *= 15;
+      else if (iu === "tsp" && bu === "ml") qtyInBase *= 5;
+      else if (iu === "tbsp" && bu === "g") qtyInBase *= 15;
+      else if (iu === "tsp" && bu === "g") qtyInBase *= 5;
+      const cpu = ing.packCost / ing.packSize / ((ing.yieldPct || 100) / 100);
+      costEst = cpu * qtyInBase;
+    }
+    totalCost += costEst;
+
+    const matchCell = ing
+      ? '<span style="color:var(--green);font-weight:600">' + escHtml(ing.name) + '</span>' +
+        '<div style="font-size:10px;color:var(--text-muted)">' + escHtml(ing.category) + ' · ' + fmt(ing.packCost) + '/' + ing.packSize + ing.unit + '</div>'
+      : '<select id="rscan-match-' + idx + '" onchange="rscanUpdateMatch(' + idx + ',this.value)" style="background:var(--bg-input);border:1px solid var(--border);color:var(--accent);font-family:var(--font);font-size:12px;padding:4px 6px;border-radius:4px;outline:none;width:100%">' +
+        '<option value="">+ Add as new</option>' +
+        state.ingredients.map(i =>
+          '<option value="' + escAttr(i.id) + '">' + escHtml(i.name) + ' (' + i.unit + ')</option>'
+        ).join('') +
+        '</select>';
+
+    html += '<tr style="border-bottom:1px solid var(--border)">';
+    html += '<td style="text-align:center"><input type="checkbox" class="rscan-check" data-idx="' + idx + '" ' + (checked ? 'checked' : '') + ' onchange="rscanRecalcCost()" style="accent-color:var(--accent);cursor:pointer"></td>';
+    html += '<td style="font-weight:600;font-size:13px">' + escHtml(item.name) +
+      (item.prepNote ? '<div style="font-size:10px;color:var(--text-muted);font-weight:400;font-style:italic">' + escHtml(item.prepNote) + '</div>' : '') + '</td>';
+    html += '<td>' + matchCell + '</td>';
+    html += '<td><input type="number" class="rscan-qty" data-idx="' + idx + '" value="' + (item.qty || 0) + '" min="0" step="any" onchange="rscanRecalcCost()" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:4px 6px;border-radius:4px;outline:none;width:100%;box-sizing:border-box"></td>';
+    html += '<td><select class="rscan-unit" data-idx="' + idx + '" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:4px 6px;border-radius:4px;outline:none;width:100%;box-sizing:border-box">';
+    ["g", "kg", "ml", "L", "each", "portion", "tbsp", "tsp", "bunch", "pinch", "slice"].forEach(function (u) {
+      html += '<option' + (u === (item.unit || "g") ? ' selected' : '') + '>' + u + '</option>';
+    });
+    html += '</select></td>';
+    html += '<td style="font-size:11px;color:var(--text-muted)">' + escHtml(item.prepNote || "—") + '</td>';
+    html += '<td class="rscan-cost-cell" data-idx="' + idx + '" style="font-weight:600;font-size:13px;color:' + (costEst > 0 ? 'var(--text-primary)' : 'var(--text-muted)') + '">' +
+      (costEst > 0 ? fmt(costEst) : '—') + '</td>';
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+
+  // ─── Cost summary ───────────────────────────────────────────
+  const portions = d.portions || 1;
+  html += '<div id="rscan-cost-summary" style="margin-top:12px;padding:12px 16px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm);display:flex;gap:24px;flex-wrap:wrap">';
+  html += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Total Cost</div><div style="font-size:20px;font-weight:800;color:var(--text-primary)" id="rscan-total-cost">' + fmt(totalCost) + '</div></div>';
+  html += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Per Portion</div><div style="font-size:20px;font-weight:800;color:var(--accent)" id="rscan-portion-cost">' + fmt(totalCost / portions) + '</div></div>';
+  if (unmatched) {
+    html += '<div style="margin-left:auto;align-self:center"><div style="font-size:11px;color:var(--accent)">⚠ ' + unmatched + ' unmatched ingredient' + (unmatched !== 1 ? 's' : '') + ' — cost is estimated</div></div>';
+  }
+  html += '</div>';
+
+  // ─── Notes / method ─────────────────────────────────────────
+  if (d.notes) {
+    html += '<div style="margin-top:12px"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px">Method / Notes</label>';
+    html += '<textarea id="rscan-notes" rows="4" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;padding:8px 10px;border-radius:5px;outline:none;width:100%;box-sizing:border-box;resize:vertical">' + escHtml(d.notes) + '</textarea></div>';
+  }
+
+  resultsEl.innerHTML = html;
+}
+
+// When user manually picks a library match from the dropdown
+function rscanUpdateMatch(idx, ingId) {
+  if (!_recipeScanData) return;
+  const item = _recipeScanData.ingredients[idx];
+  if (!item) return;
+  if (ingId) {
+    const ing = state.ingredients.find(i => i.id === ingId);
+    if (ing) { item._matchedId = ing.id; item._matchedName = ing.name; }
+  } else {
+    item._matchedId = null;
+    item._matchedName = null;
+  }
+  rscanRecalcCost();
+}
+
+function rscanRecalcCost() {
+  if (!_recipeScanData) return;
+  let totalCost = 0;
+  const ings = _recipeScanData.ingredients || [];
+  ings.forEach(function (item, idx) {
+    const checkEl = document.querySelector('.rscan-check[data-idx="' + idx + '"]');
+    const qtyEl = document.querySelector('.rscan-qty[data-idx="' + idx + '"]');
+    const unitEl = document.querySelector('.rscan-unit[data-idx="' + idx + '"]');
+    const costCell = document.querySelector('.rscan-cost-cell[data-idx="' + idx + '"]');
+    if (!checkEl || !checkEl.checked) { if (costCell) { costCell.textContent = "—"; costCell.style.color = "var(--text-muted)"; } return; }
+
+    // Update item from UI
+    if (qtyEl) item.qty = parseFloat(qtyEl.value) || 0;
+    if (unitEl) item.unit = unitEl.value;
+
+    // Check if match was changed via dropdown
+    const selEl = document.getElementById("rscan-match-" + idx);
+    if (selEl) {
+      const selId = selEl.value;
+      if (selId) {
+        const matchIng = state.ingredients.find(i => i.id === selId);
+        if (matchIng) { item._matchedId = matchIng.id; item._matchedName = matchIng.name; }
+      } else {
+        item._matchedId = null; item._matchedName = null;
+      }
+    }
+
+    const ing = item._matchedId ? state.ingredients.find(i => i.id === item._matchedId) : null;
+    let costEst = 0;
+    if (ing && ing.packSize > 0 && ing.packCost > 0) {
+      let qtyInBase = item.qty || 0;
+      const iu = (item.unit || "").toLowerCase();
+      const bu = (ing.unit || "").toLowerCase();
+      if (iu === "kg" && bu === "g") qtyInBase *= 1000;
+      else if (iu === "g" && bu === "kg") qtyInBase /= 1000;
+      else if (iu === "l" && bu === "ml") qtyInBase *= 1000;
+      else if (iu === "ml" && bu === "l") qtyInBase /= 1000;
+      else if (iu === "tbsp" && bu === "ml") qtyInBase *= 15;
+      else if (iu === "tsp" && bu === "ml") qtyInBase *= 5;
+      else if (iu === "tbsp" && bu === "g") qtyInBase *= 15;
+      else if (iu === "tsp" && bu === "g") qtyInBase *= 5;
+      const cpu = ing.packCost / ing.packSize / ((ing.yieldPct || 100) / 100);
+      costEst = cpu * qtyInBase;
+    }
+    totalCost += costEst;
+    if (costCell) {
+      costCell.textContent = costEst > 0 ? fmt(costEst) : "—";
+      costCell.style.color = costEst > 0 ? "var(--text-primary)" : "var(--text-muted)";
+    }
+  });
+
+  const portions = parseInt(document.getElementById("rscan-portions")?.value) || 1;
+  const totalEl = document.getElementById("rscan-total-cost");
+  const portEl = document.getElementById("rscan-portion-cost");
+  if (totalEl) totalEl.textContent = fmt(totalCost);
+  if (portEl) portEl.textContent = fmt(totalCost / portions);
+}
+
+function applyRecipeScan() {
+  if (!_recipeScanData) return;
+  const d = _recipeScanData;
+  const name = document.getElementById("rscan-name")?.value.trim() || d.recipeName || "Scanned Recipe";
+  const category = document.getElementById("rscan-category")?.value || d.category || "Main";
+  const portions = parseInt(document.getElementById("rscan-portions")?.value) || d.portions || 1;
+  const notes = document.getElementById("rscan-notes")?.value || d.notes || "";
+
+  const recipeIngs = [];
+  let newIngCount = 0;
+
+  (d.ingredients || []).forEach(function (item, idx) {
+    const checkEl = document.querySelector('.rscan-check[data-idx="' + idx + '"]');
+    if (!checkEl || !checkEl.checked) return;
+
+    const qtyEl = document.querySelector('.rscan-qty[data-idx="' + idx + '"]');
+    const unitEl = document.querySelector('.rscan-unit[data-idx="' + idx + '"]');
+    const qty = parseFloat(qtyEl?.value) || item.qty || 0;
+    const unit = unitEl?.value || item.unit || "g";
+
+    let ingId = item._matchedId;
+
+    // If not matched, create a new ingredient in the library
+    if (!ingId) {
+      const autoAllergens = detectAllergens(item.name);
+      const newIng = {
+        id: uid(),
+        name: item.name,
+        category: category === "Bakery" ? "Bakery" : "Other",
+        packSize: 0,
+        packCost: 0,
+        unit: unit,
+        yieldPct: 100,
+        allergens: autoAllergens,
+        nutrition: {},
+        supplierId: null,
+        priceHistory: [],
+        altSuppliers: [],
+        seasonal: false,
+      };
+      state.ingredients.push(newIng);
+      ingId = newIng.id;
+      newIngCount++;
+    }
+
+    // Convert qty to base unit of the ingredient
+    const ing = state.ingredients.find(i => i.id === ingId);
+    let qtyConverted = qty;
+    if (ing) {
+      const iu = unit.toLowerCase();
+      const bu = (ing.unit || "g").toLowerCase();
+      if (iu === "kg" && bu === "g") qtyConverted = qty * 1000;
+      else if (iu === "g" && bu === "kg") qtyConverted = qty / 1000;
+      else if (iu === "l" && bu === "ml") qtyConverted = qty * 1000;
+      else if (iu === "ml" && bu === "l") qtyConverted = qty / 1000;
+      else if (iu === "tbsp" && bu === "ml") qtyConverted = qty * 15;
+      else if (iu === "tsp" && bu === "ml") qtyConverted = qty * 5;
+      else if (iu === "tbsp" && bu === "g") qtyConverted = qty * 15;
+      else if (iu === "tsp" && bu === "g") qtyConverted = qty * 5;
+    }
+
+    recipeIngs.push({ ingId, qty: qtyConverted });
+  });
+
+  // Create the recipe
+  const recipe = {
+    id: uid(),
+    name: name,
+    category: category,
+    portions: portions,
+    notes: notes,
+    ingredients: recipeIngs,
+    subRecipes: [],
+  };
+  state.recipes.push(recipe);
+  state.activeRecipeId = recipe.id;
+  save();
+
+  closeRecipeScanModal();
+  showView("recipes");
+  renderRecipeList();
+  renderRecipeEditor();
+  renderSidebarRecipes();
+
+  // Show success toast
+  const matchedCount = recipeIngs.length - newIngCount;
+  let msg = '✅ "' + name + '" created with ' + recipeIngs.length + ' ingredient' + (recipeIngs.length !== 1 ? 's' : '');
+  if (newIngCount) msg += ' (' + newIngCount + ' new added to library)';
+  showToast(msg, "success", 5000);
 }
 
 function openInvoiceModal(supplierId) {

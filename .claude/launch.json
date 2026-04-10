@@ -6,6 +6,13 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["start"],
       "port": null
+    },
+    {
+      "name": "Ordering App",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd /d C:\\Users\\gytod\\Desktop\\recipe-ordering-app && npx vite"],
+      "port": 5555,
+      "autoPort": true
     }
   ]
 }

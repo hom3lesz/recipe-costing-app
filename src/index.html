@@ -179,6 +179,7 @@
           <div style="display:flex;gap:8px">
             <button class="btn-secondary" onclick="openSetPricesModal()">💰 Set Prices</button>
             <button class="btn-secondary" onclick="openSpecialsBoard()">📋 Specials Board</button>
+            <button class="btn-secondary" onclick="openRecipeScanModal()">📷 Scan Recipe</button>
             <button class="btn-primary" onclick="newRecipe()">+ New Recipe</button>
           </div>
         </div>
@@ -1157,6 +1158,41 @@
         <button class="btn-primary" id="invoice-scan-btn" onclick="startInvoiceScan()">📂 Choose Invoice File(s)</button>
         <button class="btn-primary hidden" id="invoice-apply-btn" onclick="applyInvoiceUpdates()">Apply Price Updates</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Recipe Scan Modal -->
+<div id="recipe-scan-modal" class="modal-overlay hidden">
+  <div class="modal" style="width:900px;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <h2>📷 Scan Recipe from Photo</h2>
+      <button class="modal-close" onclick="closeRecipeScanModal()">✕</button>
+    </div>
+    <div class="modal-body" style="flex:1;overflow-y:auto">
+      <!-- AI Model selector -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+        <label style="font-size:12px;color:var(--text-secondary);white-space:nowrap;font-weight:600">AI Model</label>
+        <select id="rscan-model" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;padding:5px 8px;border-radius:5px;outline:none;flex:1">
+          <option value="claude">Claude Sonnet</option>
+          <option value="gemini-flash">Gemini 2.5 Flash</option>
+          <option value="gemini-flash-lite">Gemini 2.5 Flash-Lite</option>
+        </select>
+        <span id="rscan-key-status" style="font-size:12px;white-space:nowrap"></span>
+        <button class="btn-secondary btn-sm" onclick="showView('settings');closeRecipeScanModal()" style="white-space:nowrap">⚙ Keys</button>
+      </div>
+
+      <div id="rscan-status" style="color:var(--text-secondary);font-size:13px;margin-bottom:12px">
+        Take a photo of a handwritten or printed recipe — the AI will extract ingredients, quantities, and method, then match them to your ingredient library for instant costing.
+      </div>
+
+      <!-- Results area -->
+      <div id="rscan-results" class="hidden"></div>
+    </div>
+    <div class="modal-footer" style="justify-content:flex-end">
+      <button class="btn-secondary" onclick="closeRecipeScanModal()">Cancel</button>
+      <button class="btn-primary" id="rscan-scan-btn" onclick="startRecipeScan()">📂 Choose Photo / PDF</button>
+      <button class="btn-primary hidden" id="rscan-apply-btn" onclick="applyRecipeScan()">✓ Create Recipe</button>
     </div>
   </div>
 </div>
