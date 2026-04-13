@@ -6031,13 +6031,17 @@ function buildPriceComparison(costPerPortion) {
           <div style="font-size:9px;color:var(--text-muted)">suggested minimum</div>
         </div>
       </div>
-      ${
-        annualDiff > 50
+      ${(() => {
+        const currentPrice = overridePrice || minPrice;
+        const currentProfit = currentPrice - costPerPortion;
+        const annualProfit = currentProfit * covers * 52;
+        const priceLabel = overridePrice ? "override price" : `suggested ${gpTarget}% GP`;
+        return annualProfit > 0
           ? `<div style="font-size:11px;color:var(--text-secondary);line-height:1.5;padding:7px 9px;background:var(--bg-card2);border-radius:5px;border-left:3px solid var(--green)">
-        At ${covers} covers/week, this price range is worth <span style="color:var(--green);font-weight:700">${cur}${Math.round(annualDiff).toLocaleString()}/yr</span> difference.
+        At <strong>${cur}${currentPrice.toFixed(2)}</strong> (${priceLabel}) &times; ${covers} covers/week = <span style="color:var(--green);font-weight:700">${cur}${Math.round(annualProfit).toLocaleString()}/yr</span> profit.
       </div>`
-          : ""
-      }
+          : "";
+      })()}
     </div>
   </div>`;
 }
@@ -11397,6 +11401,15 @@ function updatePriceOverride(val) {
     }
   } else if (wrap) {
     wrap.innerHTML = "";
+  }
+  // Refresh sticky cost bar so top numbers update live
+  const bar = document.getElementById("sticky-cost-bar");
+  if (bar) {
+    const totalCost = recipeTotalCost(recipe);
+    const cpp = totalCost / (recipe.portions || 1);
+    const sugPrice = suggestPrice(cpp, state.activeGP);
+    const foodCostPct = sugPrice > 0 ? (cpp / sugPrice) * 100 : 0;
+    bar.outerHTML = buildStickyCostBar(recipe, cpp, sugPrice, foodCostPct);
   }
   save();
 }
@@ -20622,10 +20635,15 @@ function renderCompletionTracker() {
   const stats = sellable.map((r) => {
     const hasPrice = !!(r.priceOverride && r.priceOverride > 0);
     const hasMethod = (r.methods || r.method || []).length > 0;
-    const hasCost = r.ingredients.some((ri) => {
+    const hasCostFromIngs = r.ingredients.some((ri) => {
       const ing = state.ingredients.find((i) => i.id === ri.ingId);
       return ing && ing.packCost > 0 && ing.packSize > 0;
     });
+    const hasCostFromSubs = (r.subRecipes || []).some((sr) => {
+      const sub = state.recipes.find((x) => x.id === sr.recipeId);
+      return sub && recipeTotalCost(sub) > 0;
+    });
+    const hasCost = hasCostFromIngs || hasCostFromSubs;
     const hasAllergens = r.ingredients.some((ri) => {
       const ing = state.ingredients.find((i) => i.id === ri.ingId);
       return ing && (ing.allergens || []).length > 0;
