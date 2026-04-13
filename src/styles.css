@@ -2491,6 +2491,7 @@ input[type=range].gp-slider {
 .inv-td-r { text-align: right; }
 .invoice-history-row:last-child .inv-td { border-bottom: none; }
 .invoice-history-row:hover .inv-td { background: var(--bg-hover); }
+.inv-month-body.hidden { display: none; }
 
 .tool-card-hover {
   border-color: var(--accent) !important;

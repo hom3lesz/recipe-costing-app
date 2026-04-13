@@ -7696,9 +7696,10 @@ function _ingBuildRow(ing) {
       return '<span style="color:var(--text-muted);font-size:11px">—</span>';
     const last = hist[hist.length - 1];
     const daysAgo = Math.floor((Date.now() - new Date(last.date)) / 86400000);
-    const delta = hist.length >= 2 ? last.cost - hist[hist.length - 2].cost : 0;
-    const arrow =
-      delta > 0.001
+    const delta = (last.change !== undefined) ? last.change : (hist.length >= 2 ? last.cost - hist[hist.length - 2].cost : 0);
+    const arrow = last.confirmed
+      ? '<span style="color:var(--green)" title="Price confirmed, no change">✓</span>'
+      : delta > 0.001
         ? '<span style="color:var(--red)">↑</span>'
         : delta < -0.001
           ? '<span style="color:var(--green)">↓</span>'
@@ -7996,7 +7997,7 @@ function openIngredientModal(id = null, prefillName = "") {
       if (prefillName) nameEl.select(); // select so user can correct if needed
     }
   }, 50);
-  // Wire name input to auto-detect allergens (only for new ingredients)
+  // Wire name input to auto-detect allergens + category (only for new ingredients)
   const nameInput = document.getElementById("ing-name");
   nameInput.oninput = function () {
     if (!editingIngredientId) {
@@ -8007,11 +8008,33 @@ function openIngredientModal(id = null, prefillName = "") {
           hint.textContent = "";
           hint.style.display = "none";
         }
+        // Reset category hint
+        const catHint = document.getElementById("cat-detect-hint");
+        if (catHint) { catHint.textContent = ""; catHint.style.display = "none"; }
       } else {
         autoDetectAllergens(this.value);
+        // Auto-categorise from name
+        const guessed = guessIngCategory(this.value);
+        const catSel = document.getElementById("ing-category");
+        const catHint = document.getElementById("cat-detect-hint");
+        if (guessed && catSel) {
+          catSel.value = guessed;
+          if (catHint) {
+            catHint.textContent = "⚡ Auto: " + guessed;
+            catHint.style.display = "block";
+          }
+        } else if (catHint) {
+          catHint.textContent = "";
+          catHint.style.display = "none";
+        }
       }
     }
   };
+  // Also auto-categorise on prefill
+  if (!id && prefillName) {
+    const guessed = guessIngCategory(prefillName);
+    if (guessed) document.getElementById("ing-category").value = guessed;
+  }
   setTimeout(() => nameInput.focus(), 50);
 }
 
@@ -12007,6 +12030,9 @@ function renderSupplierList() {
           '<button class="btn-primary btn-sm" onclick="openInvoiceModal(\'' +
           sup.id +
           "')\">📄 Scan Invoice</button>" +
+          '<button class="btn-icon" onclick="startPriceListImport(\'' +
+          sup.id +
+          '\')" title="Import price list from Excel" style="font-size:13px">📥</button>' +
           '<button class="btn-icon" onclick="toggleSupplierBody(\'' +
           sup.id +
           '\')" title="Collapse / Expand" id="sup-chev-' +
@@ -12045,6 +12071,7 @@ function renderSupplierList() {
               staleCount +
               " stale</span>"
             : "") +
+          _buildInvoiceReminder(invoiceHistory) +
           (sup.notes
             ? '<span class="sup-pill" style="font-style:italic">' +
               escHtml(sup.notes) +
@@ -12212,6 +12239,44 @@ function toggleSupplierBody(supId) {
   if (chev) chev.innerHTML = isOpen ? "&#9654;" : "&#9660;";
 }
 
+// Detect invoice frequency and warn if overdue
+function _buildInvoiceReminder(invoiceHistory) {
+  if (!invoiceHistory || invoiceHistory.length < 3) return ""; // need 3+ to detect pattern
+  // Get dates of non-credit invoices, sorted newest first
+  var dates = invoiceHistory
+    .filter(function(i) { return !i.isCredit && (i.total || 0) > 0; })
+    .map(function(i) {
+      var d = i.date && i.date !== "undefined" ? new Date(i.date + "T00:00:00") : null;
+      return d && !isNaN(d) ? d.getTime() : null;
+    })
+    .filter(Boolean)
+    .sort(function(a, b) { return b - a; });
+  if (dates.length < 3) return "";
+  // Calculate average gap between invoices (using last 6)
+  var recent = dates.slice(0, 6);
+  var gaps = [];
+  for (var i = 0; i < recent.length - 1; i++) {
+    gaps.push(recent[i] - recent[i + 1]);
+  }
+  var avgGap = gaps.reduce(function(s, g) { return s + g; }, 0) / gaps.length;
+  var avgDays = Math.round(avgGap / 86400000);
+  if (avgDays < 3 || avgDays > 60) return ""; // too frequent or too rare to be useful
+  // How long since last invoice?
+  var daysSinceLast = Math.floor((Date.now() - dates[0]) / 86400000);
+  var overdueDays = daysSinceLast - avgDays;
+  if (overdueDays < 2) return ""; // not overdue yet
+  // Determine severity
+  var col, label;
+  if (overdueDays >= avgDays) {
+    col = "var(--red)";
+    label = "⚠ Invoice " + overdueDays + "d overdue";
+  } else {
+    col = "var(--accent)";
+    label = "📋 Invoice due (" + daysSinceLast + "d since last, avg every " + avgDays + "d)";
+  }
+  return '<span class="sup-pill" style="color:' + col + ';font-weight:600" title="Average invoice frequency: every ' + avgDays + ' days. Last invoice: ' + daysSinceLast + ' days ago.">' + label + '</span>';
+}
+
 function buildInvoiceHistory(sup) {
   const allHistory = sup.invoiceHistory || [];
   if (!allHistory.length) return "";
@@ -12221,20 +12286,36 @@ function buildInvoiceHistory(sup) {
   );
   const creditTotal = allHistory.filter(function(i) { return i.isCredit || (i.total || 0) < 0; }).reduce(function(s, i) { return s + Math.abs(i.total || 0); }, 0);
 
-  // Group by month
+  // Group by month — credit notes go to the month of the invoice they reference
   const months = {};
+  // Build a lookup: invoice id → month key, so credits can be placed in the right month
+  var _invMonthKey = {};
   allHistory.forEach(function(inv) {
     var _d = inv.date && inv.date !== "undefined" && inv.date !== "null"
       ? new Date(inv.date + "T00:00:00") : null;
     var key = _d && !isNaN(_d) ? _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0') : 'unknown';
+    _invMonthKey[inv.id] = key;
+  });
+  allHistory.forEach(function(inv) {
+    var isCredit = inv.isCredit || (inv.total || 0) < 0;
+    var _d = inv.date && inv.date !== "undefined" && inv.date !== "null"
+      ? new Date(inv.date + "T00:00:00") : null;
+    var ownKey = _d && !isNaN(_d) ? _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0') : 'unknown';
+    // If credit is linked to an invoice, place it in that invoice's month
+    var key = (isCredit && inv.linkedInvoiceId && _invMonthKey[inv.linkedInvoiceId])
+      ? _invMonthKey[inv.linkedInvoiceId]
+      : ownKey;
     if (!months[key]) months[key] = { invoices: [], label: '', total: 0 };
     months[key].invoices.push(inv);
     months[key].total += (inv.total || 0);
-    if (_d && !isNaN(_d)) {
-      months[key].label = _d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-    } else {
-      months[key].label = 'Unknown date';
+    // Set label from the first non-credit invoice, or fallback to this date
+    if (!months[key].label && _d && !isNaN(_d)) {
+      // Use the key's own date for label, not the credit's
+      var _keyParts = key.split('-');
+      var _labelDate = new Date(parseInt(_keyParts[0]), parseInt(_keyParts[1]) - 1, 1);
+      months[key].label = _labelDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
     }
+    if (!months[key].label) months[key].label = 'Unknown date';
   });
 
   // Sort month keys newest first
@@ -12278,26 +12359,35 @@ function buildInvoiceHistory(sup) {
     );
   }
 
-  var monthSections = sortedKeys.map(function(key) {
+  var monthSections = sortedKeys.map(function(key, idx) {
     var m = months[key];
     var monthTotal = m.total;
     var invoiceCount = m.invoices.length;
     var monthRows = m.invoices.map(_buildInvRow).join('');
     var totalCol = monthTotal < 0 ? 'var(--red)' : 'var(--accent)';
+    var collapsed = idx > 0; // only latest month expanded
     return '<div class="inv-month-group" style="margin-bottom:4px">'
-      + '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--bg-sidebar);border-radius:var(--radius-sm);margin-bottom:2px;cursor:pointer" onclick="this.parentElement.querySelector(\'.inv-month-body\').classList.toggle(\'hidden\')">'
-      + '<span style="font-size:11px;font-weight:700;color:var(--text-secondary)">' + escHtml(m.label) + ' <span style="font-weight:400;color:var(--text-muted)">(' + invoiceCount + ')</span></span>'
+      + '<div class="inv-month-header" style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--bg-sidebar);border-radius:var(--radius-sm);margin-bottom:2px;cursor:pointer;user-select:none" onclick="var body=this.parentElement.querySelector(\'.inv-month-body\');body.classList.toggle(\'hidden\');this.querySelector(\'.inv-chev\').textContent=body.classList.contains(\'hidden\')?\'▸\':\'▾\'">'
+      + '<span style="font-size:11px;font-weight:700;color:var(--text-secondary)"><span class="inv-chev" style="display:inline-block;width:12px;color:var(--text-muted)">' + (collapsed ? '▸' : '▾') + '</span>' + escHtml(m.label) + ' <span style="font-weight:400;color:var(--text-muted)">(' + invoiceCount + ')</span></span>'
       + '<span style="font-size:11px;font-weight:700;color:' + totalCol + '">' + fmt(Math.abs(monthTotal)) + (monthTotal < 0 ? ' CR' : '') + '</span>'
       + '</div>'
-      + '<table class="inv-month-body" style="width:100%;border-collapse:collapse;font-size:11px">'
+      + '<table class="inv-month-body' + (collapsed ? ' hidden' : '') + '" style="width:100%;border-collapse:collapse;font-size:11px">'
       + '<colgroup><col style="width:60px"><col style="min-width:0"><col style="width:88px"></colgroup>'
       + '<tbody>' + monthRows + '</tbody></table></div>';
   }).join('');
 
-  var summaryLine = '<div style="display:flex;gap:12px;font-size:11px;margin-bottom:8px;padding:6px 8px;background:var(--bg-card2);border-radius:var(--radius-sm)">'
+  // Current month total
+  var _now = new Date();
+  var _curMonthKey = _now.getFullYear() + '-' + String(_now.getMonth() + 1).padStart(2, '0');
+  var thisMonthTotal = months[_curMonthKey] ? months[_curMonthKey].total : 0;
+
+  var summaryLine = '<div style="display:flex;gap:12px;font-size:11px;margin-bottom:8px;padding:6px 8px;background:var(--bg-card2);border-radius:var(--radius-sm);align-items:center;flex-wrap:wrap">'
     + '<span style="color:var(--text-muted)">Total: <b style="color:var(--accent)">' + fmt(totalSpend) + '</b></span>'
+    + '<span style="color:var(--text-muted)">This month: <b style="color:var(--text-primary)">' + fmt(thisMonthTotal) + '</b></span>'
     + (creditTotal > 0 ? '<span style="color:var(--text-muted)">Credits: <b style="color:var(--red)">' + fmt(creditTotal) + '</b></span>' : '')
     + '<span style="color:var(--text-muted)">' + allHistory.length + ' invoice' + (allHistory.length !== 1 ? 's' : '') + '</span>'
+    + '<span style="margin-left:auto;cursor:pointer;color:var(--text-muted);font-size:10px" onclick="var w=this.closest(\'.inv-hist-wrap\');var bodies=w.querySelectorAll(\'.inv-month-body\');var chevs=w.querySelectorAll(\'.inv-chev\');var allHidden=[].every.call(bodies,function(b){return b.classList.contains(\'hidden\')});bodies.forEach(function(b){b.classList.toggle(\'hidden\',!allHidden)});chevs.forEach(function(c){c.textContent=allHidden?\'▾\':\'▸\'});this.textContent=allHidden?\'Collapse all\':\'Expand all\'">'
+    + 'Expand all</span>'
     + '</div>';
 
   return '<div class="inv-hist-wrap">' + summaryLine + monthSections + "</div>";
@@ -12700,14 +12790,13 @@ function populateSupplierDropdown(selectedId) {
 // ─── Price History ─────────────────────────────────────────────
 function logPriceChange(ing, oldCost, newCost) {
   if (!ing.priceHistory) ing.priceHistory = [];
-  if (oldCost === newCost) return;
-  // Store in unified format: { date, packCost } = the OLD price before the change
-  // This matches the format used by quick-edit and invoice scanning
+  // Always log — even if price unchanged, records that it was verified
   ing.priceHistory.push({
     date: new Date().toISOString().slice(0, 10),
     packCost: oldCost,
     newCost: newCost,
     change: newCost - oldCost,
+    confirmed: oldCost === newCost,
   });
 }
 
@@ -13683,6 +13772,252 @@ function saveGeneralSettings() {
   // Refresh recipe editor GP if open
   const recipe = getActiveRecipe();
   if (recipe) renderRecipeEditor();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── Price List Import from Excel ───────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+let _priceListState = null;
+
+async function startPriceListImport(supplierId) {
+  const sup = state.suppliers.find(s => s.id === supplierId);
+  if (!sup) return;
+
+  const result = await browserIPC.openExcel();
+  if (!result) return;
+
+  try {
+    const data = Uint8Array.from(atob(result.base64), c => c.charCodeAt(0));
+    const wb = XLSX.read(data, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    if (!rows.length) { showToast("Spreadsheet is empty", "error"); return; }
+
+    const headers = Object.keys(rows[0]);
+    // Auto-detect name and price columns
+    const nameAliases = ["name", "product", "item", "description", "ingredient", "product name", "item name"];
+    const priceAliases = ["price", "cost", "pack cost", "unit price", "net price", "£", "gbp", "ex vat", "total"];
+    const packAliases = ["pack size", "packsize", "size", "weight", "pack qty", "case size"];
+
+    var nameCol = headers.find(h => nameAliases.includes(h.trim().toLowerCase())) || "";
+    var priceCol = headers.find(h => priceAliases.includes(h.trim().toLowerCase())) || "";
+    var packCol = headers.find(h => packAliases.includes(h.trim().toLowerCase())) || "";
+
+    // Get all ingredients linked to this supplier (primary + alt)
+    var supIngs = state.ingredients.filter(i => {
+      if (i.supplierId === supplierId) return true;
+      return (i.altSuppliers || []).some(a => a.supplierId === supplierId);
+    });
+
+    _priceListState = {
+      supplierId, supplierName: sup.name,
+      fileName: result.name, rows, headers,
+      nameCol, priceCol, packCol,
+      supIngs,
+      matches: [],
+    };
+
+    _renderPriceListModal();
+  } catch (e) {
+    showToast("Could not read file: " + e.message, "error", 5000);
+  }
+}
+
+function _renderPriceListModal() {
+  var s = _priceListState;
+  if (!s) return;
+  // Build modal dynamically
+  var existing = document.getElementById("pricelist-modal");
+  if (existing) existing.remove();
+
+  var modal = document.createElement("div");
+  modal.id = "pricelist-modal";
+  modal.className = "modal-overlay";
+  modal.innerHTML =
+    '<div class="modal" style="width:900px;max-height:90vh;display:flex;flex-direction:column">' +
+    '<div class="modal-header"><h2>📥 Import Price List — ' + escHtml(s.supplierName) + '</h2>' +
+    '<button class="modal-close" onclick="closePriceListModal()">✕</button></div>' +
+    '<div class="modal-body" style="flex:1;overflow-y:auto">' +
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">📄 ' + escHtml(s.fileName) + ' — ' + s.rows.length + ' rows · ' + s.supIngs.length + ' ingredients linked to this supplier</div>' +
+    // Column mapping
+    '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">' +
+    '<div class="form-group" style="margin:0;flex:1;min-width:140px"><label style="font-size:11px">Product Name Column <span style="color:var(--red)">*</span></label>' +
+    '<select id="pl-name-col" onchange="_priceListState.nameCol=this.value;_matchPriceList()">' +
+    '<option value="">— select —</option>' + s.headers.map(h => '<option value="' + escAttr(h) + '"' + (h === s.nameCol ? ' selected' : '') + '>' + escHtml(h) + '</option>').join('') +
+    '</select></div>' +
+    '<div class="form-group" style="margin:0;flex:1;min-width:140px"><label style="font-size:11px">Price Column <span style="color:var(--red)">*</span></label>' +
+    '<select id="pl-price-col" onchange="_priceListState.priceCol=this.value;_matchPriceList()">' +
+    '<option value="">— select —</option>' + s.headers.map(h => '<option value="' + escAttr(h) + '"' + (h === s.priceCol ? ' selected' : '') + '>' + escHtml(h) + '</option>').join('') +
+    '</select></div>' +
+    '<div class="form-group" style="margin:0;flex:1;min-width:140px"><label style="font-size:11px">Pack Size Column (optional)</label>' +
+    '<select id="pl-pack-col" onchange="_priceListState.packCol=this.value;_matchPriceList()">' +
+    '<option value="">— not mapped —</option>' + s.headers.map(h => '<option value="' + escAttr(h) + '"' + (h === s.packCol ? ' selected' : '') + '>' + escHtml(h) + '</option>').join('') +
+    '</select></div>' +
+    '</div>' +
+    '<div id="pl-results"></div>' +
+    '</div>' +
+    '<div class="modal-footer" style="justify-content:flex-end">' +
+    '<button class="btn-secondary" onclick="closePriceListModal()">Cancel</button>' +
+    '<button class="btn-primary" id="pl-apply-btn" onclick="applyPriceList()" disabled>Apply Updates</button>' +
+    '</div></div>';
+  document.body.appendChild(modal);
+
+  if (s.nameCol && s.priceCol) _matchPriceList();
+}
+
+function closePriceListModal() {
+  var el = document.getElementById("pricelist-modal");
+  if (el) el.remove();
+  _priceListState = null;
+}
+
+function _matchPriceList() {
+  var s = _priceListState;
+  if (!s || !s.nameCol || !s.priceCol) {
+    document.getElementById("pl-results").innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Map the Name and Price columns above to see matches</div>';
+    document.getElementById("pl-apply-btn").disabled = true;
+    return;
+  }
+
+  // Match each Excel row to a supplier ingredient
+  s.matches = [];
+  s.rows.forEach(function(row, rowIdx) {
+    var xlName = String(row[s.nameCol] || "").trim();
+    if (!xlName) return;
+    var xlPrice = parseFloat(String(row[s.priceCol]).replace(/[£$€,]/g, "").trim());
+    if (isNaN(xlPrice) || xlPrice <= 0) return;
+    var xlPack = s.packCol ? parseFloat(String(row[s.packCol]).replace(/[^0-9.]/g, "").trim()) : null;
+
+    // Try to match against supplier ingredients
+    var bestIng = null, bestScore = 0;
+    var xlLower = xlName.toLowerCase();
+    s.supIngs.forEach(function(ing) {
+      var ingLower = ing.name.toLowerCase();
+      // Exact match
+      if (ingLower === xlLower) { bestScore = 1000; bestIng = ing; return; }
+      // Contains
+      if (ingLower.includes(xlLower) || xlLower.includes(ingLower)) {
+        var ratio = Math.min(xlLower.length, ingLower.length) / Math.max(xlLower.length, ingLower.length);
+        if (ratio > 0.4) {
+          var sc = 500 * ratio;
+          if (sc > bestScore) { bestScore = sc; bestIng = ing; }
+        }
+      }
+      // Word overlap
+      var w1 = xlLower.split(/\s+/);
+      var w2 = ingLower.split(/\s+/);
+      var overlap = w1.filter(function(w) { return w2.some(function(w2x) { return w2x.includes(w) || w.includes(w2x); }); }).length;
+      if (overlap >= 2 || (overlap === 1 && Math.max(w1.length, w2.length) <= 2)) {
+        var sc2 = 300 * (overlap / Math.max(w1.length, w2.length));
+        if (sc2 > bestScore) { bestScore = sc2; bestIng = ing; }
+      }
+    });
+
+    s.matches.push({
+      rowIdx, xlName, xlPrice,
+      xlPack: xlPack && xlPack > 0 ? xlPack : null,
+      matchedIng: bestScore >= 200 ? bestIng : null,
+      matchScore: bestScore,
+      selected: bestScore >= 200,
+    });
+  });
+
+  _renderPriceListResults();
+}
+
+function _renderPriceListResults() {
+  var s = _priceListState;
+  var matched = s.matches.filter(function(m) { return m.matchedIng; });
+  var unmatched = s.matches.filter(function(m) { return !m.matchedIng; });
+  var priceChanges = matched.filter(function(m) {
+    return m.selected && m.matchedIng && m.xlPrice !== m.matchedIng.packCost;
+  });
+
+  var html = '<div style="display:flex;gap:12px;margin-bottom:10px;font-size:12px">' +
+    '<span style="color:var(--green);font-weight:700">' + matched.length + ' matched</span>' +
+    '<span style="color:var(--text-muted)">' + unmatched.length + ' unmatched</span>' +
+    '<span style="color:var(--accent);font-weight:700">' + priceChanges.length + ' price change' + (priceChanges.length !== 1 ? 's' : '') + '</span>' +
+    '</div>';
+
+  if (matched.length) {
+    html += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:12px">' +
+      '<table class="ing-table" style="margin:0;width:100%"><thead><tr>' +
+      '<th style="width:28px">✓</th><th>Excel Name</th><th>Matched Ingredient</th><th>Current Price</th><th>New Price</th><th>Change</th>' +
+      '</tr></thead><tbody>';
+
+    matched.forEach(function(m, idx) {
+      var ing = m.matchedIng;
+      var isDefault = ing.supplierId === s.supplierId;
+      var currentCost = isDefault ? ing.packCost : ((ing.altSuppliers || []).find(function(a) { return a.supplierId === s.supplierId; }) || {}).packCost || 0;
+      var diff = m.xlPrice - currentCost;
+      var pct = currentCost > 0 ? (diff / currentCost) * 100 : 0;
+      var changeCol = diff > 0.01 ? 'var(--red)' : diff < -0.01 ? 'var(--green)' : 'var(--text-muted)';
+      var changeStr = diff > 0.01 ? '↑ ' + Math.abs(pct).toFixed(1) + '%' : diff < -0.01 ? '↓ ' + Math.abs(pct).toFixed(1) + '%' : '—';
+      var mIdx = s.matches.indexOf(m);
+      html += '<tr>' +
+        '<td style="text-align:center"><input type="checkbox" ' + (m.selected ? 'checked' : '') + ' onchange="_priceListState.matches[' + mIdx + '].selected=this.checked;_renderPriceListResults()" style="accent-color:var(--accent);cursor:pointer"></td>' +
+        '<td style="font-size:12px">' + escHtml(m.xlName) + '</td>' +
+        '<td style="font-size:12px;font-weight:600">' + escHtml(ing.name) + (isDefault ? '' : ' <span style="font-size:9px;color:var(--accent)">(alt)</span>') + '</td>' +
+        '<td style="font-size:12px">' + fmt(currentCost) + '</td>' +
+        '<td style="font-size:12px;font-weight:700">' + fmt(m.xlPrice) + '</td>' +
+        '<td style="font-size:12px;font-weight:700;color:' + changeCol + '">' + changeStr + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  if (unmatched.length) {
+    html += '<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:12px;color:var(--text-muted);padding:6px 0">' + unmatched.length + ' unmatched rows (not in your library for this supplier)</summary>' +
+      '<div style="max-height:200px;overflow-y:auto;font-size:11px;color:var(--text-muted);padding:4px 0">' +
+      unmatched.map(function(m) { return '<div style="padding:2px 0">' + escHtml(m.xlName) + ' — ' + fmt(m.xlPrice) + '</div>'; }).join('') +
+      '</div></details>';
+  }
+
+  document.getElementById("pl-results").innerHTML = html;
+  document.getElementById("pl-apply-btn").disabled = !matched.some(function(m) { return m.selected; });
+}
+
+function applyPriceList() {
+  var s = _priceListState;
+  if (!s) return;
+  var updated = 0, alerts = [];
+
+  s.matches.forEach(function(m) {
+    if (!m.selected || !m.matchedIng) return;
+    var ing = state.ingredients.find(function(i) { return i.id === m.matchedIng.id; });
+    if (!ing) return;
+
+    var isDefault = ing.supplierId === s.supplierId;
+    if (isDefault) {
+      var oldCost = ing.packCost;
+      logPriceChange(ing, oldCost, m.xlPrice);
+      if (oldCost > 0 && m.xlPrice > 0 && m.xlPrice !== oldCost) {
+        alerts.push({ name: ing.name, oldCost: oldCost, newCost: m.xlPrice, pctChange: ((m.xlPrice - oldCost) / oldCost) * 100 });
+      }
+      ing.packCost = m.xlPrice;
+      if (m.xlPack) ing.packSize = m.xlPack;
+    } else {
+      // Alt supplier
+      var alt = (ing.altSuppliers || []).find(function(a) { return a.supplierId === s.supplierId; });
+      if (alt) {
+        alt.packCost = m.xlPrice;
+        if (m.xlPack) alt.packSize = m.xlPack;
+      }
+    }
+    updated++;
+  });
+
+  save();
+  closePriceListModal();
+  renderSupplierList();
+  renderIngredientLibrary();
+
+  if (alerts.length) {
+    var rises = alerts.filter(function(a) { return a.pctChange > 0; });
+    var drops = alerts.filter(function(a) { return a.pctChange < 0; });
+    showPriceAlertSummary(alerts, rises, drops);
+  }
+  showToast("✓ " + updated + " ingredient" + (updated !== 1 ? "s" : "") + " updated from price list", "success", 4000);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
