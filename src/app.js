@@ -19626,15 +19626,19 @@ function updateWhatIf() {
   const recipe = getActiveRecipe();
   if (!ing || !recipe) return;
 
+  // Calculate original cost first
+  invalidateCostCache();
+  const origCpp = recipeTotalCost(recipe) / (recipe.portions || 1);
+
   // Calculate new cost with modified ingredient price
   const origCost = ing.packCost;
   const newCost = origCost * (1 + pctChange / 100);
   ing.packCost = newCost;
+  invalidateCostCache();
   const newTotalCost = recipeTotalCost(recipe);
   const newCpp = newTotalCost / (recipe.portions || 1);
   ing.packCost = origCost; // restore
-
-  const origCpp = recipeTotalCost(recipe) / (recipe.portions || 1);
+  invalidateCostCache();
   const diff = newCpp - origCpp;
   const diffPct = origCpp > 0 ? (diff / origCpp) * 100 : 0;
   const price = recipe.priceOverride || suggestPrice(origCpp, state.activeGP);
