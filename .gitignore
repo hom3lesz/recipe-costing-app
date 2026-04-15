@@ -1,0 +1,36 @@
+# Build output
+dist/
+build/
+out/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.snap
+*.zip
+
+# Dependencies
+node_modules/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local env
+.env
+.env.local
+*.local
+
+# Electron-builder cache
+.cache/
+
+# Test output
+coverage/
