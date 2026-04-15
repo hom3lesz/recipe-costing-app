@@ -1442,11 +1442,15 @@ function _renderSheetImportModal() {
     kindLbl +
     ' from File</h2><button class="modal-close" onclick="closeSheetImportModal()">✕</button></div>' +
     '<div class="modal-body" style="flex:1;overflow-y:auto">' +
-    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">📄 ' +
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">' +
+    '<div style="font-size:12px;color:var(--text-muted);flex:1;min-width:200px">📄 ' +
     escHtml(s.fileName) +
     " — " +
     s.rows.length +
     ' rows detected</div>' +
+    '<button class="btn-primary btn-sm" id="sheet-import-ai-btn" onclick="aiAutoImportSheet()" title="Let AI read the file and convert it into the app format automatically">🪄 AI Auto-Import</button>' +
+    '</div>' +
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Or map columns manually:</div>' +
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
     mapRows +
     "</div>" +
@@ -1464,6 +1468,250 @@ function closeSheetImportModal() {
   const el = document.getElementById("sheet-import-modal");
   if (el) el.remove();
   _sheetImportState = null;
+}
+
+// ─── AI-powered import — sends sheet rows to the configured AI model and
+//     gets back a JSON array already in the app's data format. Falls back to
+//     the manual column-mapping flow if AI fails or no API key is configured.
+async function aiAutoImportSheet() {
+  const s = _sheetImportState;
+  if (!s) return;
+  const btn = document.getElementById("sheet-import-ai-btn");
+  const preview = document.getElementById("sheet-import-preview");
+
+  let model, key;
+  try {
+    model = getActiveModel();
+    key = getActiveKey();
+  } catch (e) { /* fall through */ }
+  if (!key) {
+    showToast("No AI key configured — add one in Settings → AI Models", "error", 4000);
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "🪄 AI parsing…";
+  }
+  if (preview) {
+    preview.innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px">' +
+      '<div style="font-size:24px;margin-bottom:8px">🤖</div>' +
+      'AI is reading your file and converting ' + s.rows.length + ' rows…</div>';
+  }
+
+  // Build a compact CSV-style payload from the parsed rows. Cap to keep prompt small.
+  const ROW_CAP = 300;
+  const rowsForAi = s.rows.slice(0, ROW_CAP);
+  const csvLines = [s.headers.join("\t")];
+  rowsForAi.forEach((row) => {
+    csvLines.push(s.headers.map((h) => String(row[h] == null ? "" : row[h]).replace(/\t/g, " ").replace(/\n/g, " ")).join("\t"));
+  });
+  const tableText = csvLines.join("\n");
+
+  // Unified prompt — model can return either a flat array (single kind) OR a
+  // combined object {suppliers:[...], ingredients:[...]} when one sheet contains
+  // both. Ingredients reference suppliers by NAME via supplierName, and we link
+  // them to IDs after insert.
+  const focusHint = s.kind === "suppliers"
+    ? "The user opened this from the Suppliers screen, so prefer suppliers if the sheet only contains one kind."
+    : "The user opened this from the Ingredients screen, so prefer ingredients if the sheet only contains one kind.";
+  const prompt =
+    'You are importing data into a recipe costing app. Below is the raw spreadsheet content (TAB-separated). ' +
+    focusHint + ' Return ONLY valid JSON, no markdown, no explanation.\n\n' +
+    'OUTPUT — choose ONE of these two shapes:\n' +
+    '  (a) A flat array of records of a single kind, OR\n' +
+    '  (b) A combined object: {"suppliers":[...],"ingredients":[...]}  ← USE THIS when the sheet has BOTH supplier info and ingredient info (e.g. a supplier-name column on each ingredient row, or grouped sections per supplier).\n\n' +
+    'INGREDIENT SCHEMA: {"name":"string (required)","category":"string","packSize":number,"packCount":number,"unit":"g|ml|kg|l|each","packCost":number (required, >0),"yieldPct":number (default 100),"supplierName":"string (optional — the supplier this ingredient comes from)"}\n\n' +
+    'SUPPLIER SCHEMA: {"name":"string (required)","email":"string","phone":"string","notes":"string (address or freeform)"}\n\n' +
+    'RULES (general):\n' +
+    '- Skip header rows, blank rows, and footer/total rows.\n' +
+    '- If a sheet groups ingredients under supplier headings/sections (e.g. "BRAKES" then a list of items), create a supplier record for each section header AND set supplierName on every ingredient under it.\n' +
+    '- If a sheet has a "Supplier" column on each ingredient row, extract the unique supplier names into the suppliers array AND set supplierName on each ingredient.\n' +
+    '- Deduplicate suppliers by name (case-insensitive).\n' +
+    'INGREDIENT RULES:\n' +
+    '- name and packCost are REQUIRED. Skip rows missing either.\n' +
+    '- packCost: strip currency symbols (£, $, €) and thousands separators. Must be > 0.\n' +
+    '- packSize: total quantity inside the pack. If the row says "6x400g" → packCount=6, packSize=2400, unit="g". If just "400g" → packCount=1, packSize=400, unit="g".\n' +
+    '- Convert units sensibly: kg→g, l/ltr→ml when packSize is small enough; otherwise keep kg/l. Use "each" for piece-counted items.\n' +
+    '- category: pick from "Meat", "Dairy", "Vegetables", "Fruit", "Dry Goods", "Bakery", "Beverages", "Frozen", "Other". Guess from the name if no category column.\n' +
+    '- yieldPct: default 100 unless the sheet specifies a yield/usable %.\n' +
+    'SUPPLIER RULES:\n' +
+    '- name is required. email and phone may be in combined contact columns — split them out.\n' +
+    '- If the sheet has an address column, put it in notes.\n\n' +
+    'Output up to ' + ROW_CAP + ' records total.\n\n' +
+    'SPREADSHEET DATA:\n' + tableText;
+
+  try {
+    const raw = await window.electronAPI.callAi(model, prompt, key, 8000);
+    const cleaned = String(raw || "").replace(/```json|```/g, "").trim();
+
+    // Accept either a flat JSON array or a combined {suppliers, ingredients} object.
+    let aiSuppliers = [];
+    let aiIngredients = [];
+    let combined = false;
+    const objStart = cleaned.indexOf("{");
+    const arrStart = cleaned.indexOf("[");
+    const useObject = objStart >= 0 && (arrStart < 0 || objStart < arrStart);
+    if (useObject) {
+      const end = cleaned.lastIndexOf("}");
+      if (end < 0) throw new Error("AI did not return valid JSON");
+      const obj = JSON.parse(cleaned.slice(objStart, end + 1));
+      if (Array.isArray(obj.suppliers)) aiSuppliers = obj.suppliers;
+      if (Array.isArray(obj.ingredients)) aiIngredients = obj.ingredients;
+      if (Array.isArray(obj)) {
+        // shouldn't happen, but tolerate
+        if (s.kind === "suppliers") aiSuppliers = obj; else aiIngredients = obj;
+      }
+      combined = aiSuppliers.length > 0 && aiIngredients.length > 0;
+    } else {
+      const end = cleaned.lastIndexOf("]");
+      if (arrStart < 0 || end < 0) throw new Error("AI did not return a JSON array");
+      const arr = JSON.parse(cleaned.slice(arrStart, end + 1));
+      if (!Array.isArray(arr)) throw new Error("AI returned malformed JSON");
+      if (s.kind === "suppliers") aiSuppliers = arr; else aiIngredients = arr;
+    }
+    if (!aiSuppliers.length && !aiIngredients.length) throw new Error("AI returned no records");
+
+    // Build dedup sets against existing state.
+    const existingIngNames = new Set(state.ingredients.map((i) => (i.name || "").toLowerCase()));
+    const existingSupNames = new Set(state.suppliers.map((s2) => (s2.name || "").toLowerCase()));
+
+    const parseSupplier = (rec) => {
+      const name = String(rec.name || "").trim();
+      if (!name) return { valid: false, error: "no name", data: {} };
+      const data = {
+        name,
+        email: String(rec.email || "").trim(),
+        phone: String(rec.phone || "").trim(),
+        notes: String(rec.notes || "").trim(),
+      };
+      const duplicate = existingSupNames.has(name.toLowerCase());
+      return { valid: !duplicate, duplicate, data };
+    };
+    const parseIngredient = (rec) => {
+      const name = String(rec.name || "").trim();
+      if (!name) return { valid: false, error: "no name", data: {} };
+      const packCost = parseFloat(rec.packCost);
+      if (!isFinite(packCost) || packCost <= 0) {
+        return { valid: false, error: "no price", data: { name } };
+      }
+      const packCount = (isFinite(+rec.packCount) && +rec.packCount > 0) ? +rec.packCount : 1;
+      const packSize = (isFinite(+rec.packSize) && +rec.packSize > 0) ? +rec.packSize : 1;
+      const unit = String(rec.unit || "each").trim().toLowerCase() || "each";
+      const category = String(rec.category || "").trim() || guessIngCategory(name) || "Other";
+      const yieldPct = (isFinite(+rec.yieldPct) && +rec.yieldPct > 0) ? +rec.yieldPct : 100;
+      const supplierName = String(rec.supplierName || "").trim();
+      const data = { name, category, packSize, packCount, packCost, unit, yieldPct, supplierName };
+      const duplicate = existingIngNames.has(name.toLowerCase());
+      return { valid: !duplicate, duplicate, data };
+    };
+
+    const parsedSuppliers = aiSuppliers.map(parseSupplier);
+    const parsedIngredients = aiIngredients.map(parseIngredient);
+
+    if (combined) {
+      // Stash both, switch the importer into combined mode.
+      s.kind = "combined";
+      s.parsed = parsedIngredients;        // primary list (used by existing applySheetImport)
+      s.parsedSuppliers = parsedSuppliers; // extra suppliers list applied first
+    } else if (aiSuppliers.length) {
+      s.kind = "suppliers";
+      s.parsed = parsedSuppliers;
+    } else {
+      s.kind = "ingredients";
+      s.parsed = parsedIngredients;
+    }
+    s.aiUsed = true;
+    const parsed = s.parsed;
+
+    // Render preview — combined mode shows a supplier table AND an ingredient table.
+    const renderTable = (kind, list) => {
+      const headerCells = kind === "suppliers"
+        ? "<th>Name</th><th>Email</th><th>Phone</th><th>Status</th>"
+        : "<th>Name</th><th>Supplier</th><th>Category</th><th>Pack</th><th>Cost</th><th>Status</th>";
+      const bodyRows = list.slice(0, 50).map((p) => {
+        if (kind === "suppliers") {
+          return "<tr" + (p.duplicate ? ' style="opacity:.55"' : "") + "><td>" +
+            escHtml(p.data.name || "—") + "</td><td>" +
+            escHtml(p.data.email || "—") + "</td><td>" +
+            escHtml(p.data.phone || "—") + '</td><td style="font-size:10px">' +
+            (p.duplicate ? '<span style="color:var(--amber)">duplicate</span>'
+              : p.valid ? '<span style="color:var(--green)">new</span>'
+              : '<span style="color:var(--red)">' + escHtml(p.error || "invalid") + "</span>") +
+            "</td></tr>";
+        }
+        const d = p.data;
+        const packStr = d.packCount && d.packCount > 1
+          ? d.packCount + "×" + (d.packSize / d.packCount) + (d.unit || "")
+          : (d.packSize || "—") + " " + (d.unit || "");
+        return "<tr" + (p.duplicate ? ' style="opacity:.55"' : "") + "><td>" +
+          escHtml(d.name || "—") + "</td><td style=\"font-size:11px;color:var(--text-muted)\">" +
+          escHtml(d.supplierName || "—") + "</td><td>" +
+          escHtml(d.category || "—") + "</td><td>" +
+          escHtml(packStr) + "</td><td>" +
+          fmt(d.packCost || 0) + '</td><td style="font-size:10px">' +
+          (p.duplicate ? '<span style="color:var(--amber)">duplicate</span>'
+            : p.valid ? '<span style="color:var(--green)">new</span>'
+            : '<span style="color:var(--red)">' + escHtml(p.error || "invalid") + "</span>") +
+          "</td></tr>";
+      }).join("");
+      return '<div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;margin-bottom:10px">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead style="position:sticky;top:0;background:var(--bg-sidebar)"><tr>' +
+        headerCells + "</tr></thead><tbody>" + bodyRows + "</tbody></table></div>";
+    };
+
+    const ingValid = parsedIngredients.filter((p) => p.valid).length;
+    const supValid = parsedSuppliers.filter((p) => p.valid).length;
+    const totalValid = ingValid + supValid;
+    const applyBtn = document.getElementById("sheet-import-apply-btn");
+    if (applyBtn) {
+      applyBtn.disabled = totalValid === 0;
+      if (combined) {
+        applyBtn.textContent = "Import " + supValid + " supplier" + (supValid === 1 ? "" : "s") +
+          " + " + ingValid + " ingredient" + (ingValid === 1 ? "" : "s");
+      } else if (s.kind === "suppliers") {
+        applyBtn.textContent = "Import " + supValid + " supplier" + (supValid === 1 ? "" : "s");
+      } else {
+        applyBtn.textContent = "Import " + ingValid + " ingredient" + (ingValid === 1 ? "" : "s");
+      }
+    }
+
+    if (preview) {
+      const summaryBits = [];
+      if (parsedSuppliers.length) summaryBits.push(parsedSuppliers.length + " supplier" + (parsedSuppliers.length === 1 ? "" : "s"));
+      if (parsedIngredients.length) summaryBits.push(parsedIngredients.length + " ingredient" + (parsedIngredients.length === 1 ? "" : "s"));
+      let html =
+        '<div style="font-size:11px;color:var(--green);margin-bottom:8px">🪄 AI parsed ' + summaryBits.join(" + ") +
+        (combined ? ' (linked by name)' : '') +
+        (s.rows.length > ROW_CAP ? " (file had " + s.rows.length + " rows, AI processed first " + ROW_CAP + ")" : "") +
+        "</div>";
+      if (parsedSuppliers.length) {
+        html += '<div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;font-weight:700">Suppliers</div>' +
+          renderTable("suppliers", parsedSuppliers);
+      }
+      if (parsedIngredients.length) {
+        html += '<div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px;font-weight:700">Ingredients</div>' +
+          renderTable("ingredients", parsedIngredients);
+      }
+      preview.innerHTML = html;
+    }
+    const totalParsed = parsedSuppliers.length + parsedIngredients.length;
+    showToast("✓ AI parsed " + totalParsed + " record" + (totalParsed === 1 ? "" : "s"), "success", 2500);
+  } catch (e) {
+    console.error("[ai-import]", e);
+    showToast("AI import failed: " + e.message + " — use manual mapping below", "error", 5000);
+    if (preview) {
+      preview.innerHTML =
+        '<div style="padding:16px;text-align:center;color:var(--red);font-size:12px">' +
+        'AI parsing failed: ' + escHtml(e.message) + '. You can still map columns manually above.</div>';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "🪄 AI Auto-Import";
+    }
+  }
 }
 
 function _renderSheetImportPreview() {
@@ -1621,48 +1869,85 @@ function _parseSheetRows(s) {
 
 function applySheetImport() {
   const s = _sheetImportState;
-  if (!s || !s.parsed) return;
-  const toAdd = s.parsed.filter((p) => p.valid);
-  if (!toAdd.length) {
+  if (!s) return;
+  const allergens = typeof detectAllergens === "function" ? detectAllergens : () => [];
+  const newSupId = () => "sup_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+  const newIngId = () => "ing_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+
+  // Build a case-insensitive supplier-name → id map from existing state so any
+  // ingredient with a matching supplierName can be linked even if no new supplier
+  // is being created.
+  const supplierIdByName = new Map();
+  state.suppliers.forEach((sup) => {
+    if (sup && sup.name) supplierIdByName.set(sup.name.toLowerCase(), sup.id);
+  });
+
+  let supAdded = 0;
+  let ingAdded = 0;
+
+  // 1. Insert new suppliers first (combined mode + supplier-only mode).
+  const supplierList = s.kind === "combined"
+    ? (s.parsedSuppliers || []).filter((p) => p.valid)
+    : (s.kind === "suppliers" ? (s.parsed || []).filter((p) => p.valid) : []);
+  supplierList.forEach((p) => {
+    const id = newSupId();
+    state.suppliers.push({
+      id,
+      name: p.data.name,
+      email: p.data.email || "",
+      phone: p.data.phone || "",
+      notes: p.data.notes || "",
+      invoiceHistory: [],
+    });
+    supplierIdByName.set(p.data.name.toLowerCase(), id);
+    supAdded++;
+  });
+
+  // 2. Insert ingredients, linking supplierId by name when present.
+  const ingredientList = (s.kind === "ingredients" || s.kind === "combined")
+    ? (s.parsed || []).filter((p) => p.valid)
+    : [];
+  ingredientList.forEach((p) => {
+    const supName = (p.data.supplierName || "").toLowerCase();
+    const supplierId = supName ? (supplierIdByName.get(supName) || null) : null;
+    state.ingredients.push({
+      id: newIngId(),
+      name: p.data.name,
+      category: p.data.category,
+      packSize: p.data.packSize,
+      packCount: p.data.packCount,
+      packCost: p.data.packCost,
+      unit: p.data.unit,
+      yieldPct: p.data.yieldPct,
+      allergens: allergens(p.data.name),
+      nutrition: {},
+      priceHistory: [],
+      altSuppliers: [],
+      supplierId,
+    });
+    ingAdded++;
+  });
+
+  if (!supAdded && !ingAdded) {
     showToast("Nothing to import", "error");
     return;
   }
-  if (s.kind === "suppliers") {
-    toAdd.forEach((p) => {
-      state.suppliers.push({
-        id: "sup_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-        name: p.data.name,
-        email: p.data.email || "",
-        phone: p.data.phone || "",
-        notes: p.data.notes || "",
-        invoiceHistory: [],
-      });
-    });
-    save();
-    renderSupplierList();
-    showToast("✓ Imported " + toAdd.length + " suppliers", "success", 3000);
+
+  save();
+  if (supAdded && typeof renderSupplierList === "function") renderSupplierList();
+  if (ingAdded && typeof renderIngredientLibrary === "function") renderIngredientLibrary();
+
+  let msg = "✓ Imported ";
+  if (supAdded && ingAdded) {
+    msg += supAdded + " supplier" + (supAdded === 1 ? "" : "s") +
+      " + " + ingAdded + " ingredient" + (ingAdded === 1 ? "" : "s") +
+      " (linked)";
+  } else if (supAdded) {
+    msg += supAdded + " supplier" + (supAdded === 1 ? "" : "s");
   } else {
-    const allergens = typeof detectAllergens === "function" ? detectAllergens : () => [];
-    toAdd.forEach((p) => {
-      state.ingredients.push({
-        id: "ing_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-        name: p.data.name,
-        category: p.data.category,
-        packSize: p.data.packSize,
-        packCount: p.data.packCount,
-        packCost: p.data.packCost,
-        unit: p.data.unit,
-        yieldPct: p.data.yieldPct,
-        allergens: allergens(p.data.name),
-        nutrition: {},
-        priceHistory: [],
-        altSuppliers: [],
-      });
-    });
-    save();
-    renderIngredientLibrary();
-    showToast("✓ Imported " + toAdd.length + " ingredients", "success", 3000);
+    msg += ingAdded + " ingredient" + (ingAdded === 1 ? "" : "s");
   }
+  showToast(msg, "success", 3500);
   closeSheetImportModal();
 }
 
