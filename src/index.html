@@ -282,6 +282,7 @@
           <button class="btn-secondary btn-sm" onclick="openBulkPriceModal()">💷 Bulk Update</button>
           <button class="btn-secondary btn-sm" onclick="openDuplicateScanModal()">🔍 Duplicates</button>
           <button class="btn-secondary btn-sm" onclick="openAiCategoriseModal()" style="color:var(--accent);border-color:var(--accent)">✨ AI Categorise</button>
+          <button class="btn-secondary btn-sm" onclick="importIngredientsFromSpreadsheet()" title="Import ingredients (and suppliers) from Excel/CSV — AI auto-mapping available">📥 Import Excel</button>
           <button class="btn-primary btn-sm" onclick="openIngredientModal()">+ Add</button>
         </div>
 
@@ -361,6 +362,7 @@
         <h1>Suppliers</h1>
         <div style="display:flex;gap:10px;align-items:center">
           <input type="text" id="supplier-search" placeholder="Search suppliers…" oninput="debouncedSearch('sup', renderSupplierList)" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;padding:7px 12px;border-radius:var(--radius-sm);outline:none;width:220px"></input>
+          <button class="btn-secondary" onclick="importSuppliersFromSpreadsheet()" title="Import suppliers (and ingredients) from Excel/CSV — AI auto-mapping available">📥 Import Excel</button>
           <button class="btn-primary" onclick="openSupplierModal()">+ Add Supplier</button>
         </div>
       </div>
