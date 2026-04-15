@@ -25,8 +25,8 @@ const browserIPC = {
   getDataPath() {
     return eAPI.getDataPath();
   },
-  exportPDF(html) {
-    eAPI.exportPDF(html);
+  exportPDF(html, defaultName) {
+    eAPI.exportPDF(html, defaultName);
   },
   saveExcel(buf, name) {
     const arr =
@@ -1306,6 +1306,364 @@ function importSuppliersFromFile() {
     reader.readAsText(file);
   };
   input.click();
+}
+
+// ─── Generic Spreadsheet Importer (ingredients + suppliers) ─────────────────
+// Reads an Excel/CSV file, lets the user map columns, then inserts rows into
+// the ingredient library or supplier list. For PDF files we route through the
+// AI invoice scanner with a repurposed prompt.
+let _sheetImportState = null;
+
+async function importIngredientsFromSpreadsheet() {
+  _sheetImportKind = "ingredients";
+  _openSheetImport();
+}
+async function importSuppliersFromSpreadsheet() {
+  _sheetImportKind = "suppliers";
+  _openSheetImport();
+}
+let _sheetImportKind = "ingredients";
+
+async function _openSheetImport() {
+  const result = await browserIPC.openExcel();
+  if (!result) return;
+  try {
+    const data = Uint8Array.from(atob(result.base64), (c) => c.charCodeAt(0));
+    const wb = XLSX.read(data, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    if (!rows.length) {
+      showToast("Spreadsheet is empty", "error");
+      return;
+    }
+    const headers = Object.keys(rows[0]);
+    _sheetImportState = {
+      kind: _sheetImportKind,
+      fileName: result.name,
+      rows,
+      headers,
+      mapping: _autoMapSheetColumns(headers, _sheetImportKind),
+    };
+    _renderSheetImportModal();
+  } catch (e) {
+    showToast("Could not read file: " + e.message, "error", 5000);
+  }
+}
+
+function _autoMapSheetColumns(headers, kind) {
+  const lower = headers.map((h) => (h || "").toString().trim().toLowerCase());
+  const find = (aliases) => {
+    for (const a of aliases) {
+      const idx = lower.findIndex((h) => h === a || h.includes(a));
+      if (idx >= 0) return headers[idx];
+    }
+    return "";
+  };
+  if (kind === "suppliers") {
+    return {
+      name: find(["supplier", "name", "company", "vendor"]),
+      email: find(["email", "e-mail"]),
+      phone: find(["phone", "tel", "mobile", "contact"]),
+      notes: find(["notes", "description", "address"]),
+    };
+  }
+  return {
+    name: find(["ingredient", "product", "item", "description", "name"]),
+    category: find(["category", "group", "type"]),
+    packSize: find(["pack size", "size", "weight", "qty", "packsize"]),
+    packCount: find(["pack count", "count", "case size", "units per pack"]),
+    unit: find(["unit", "uom", "measure"]),
+    packCost: find(["pack cost", "cost", "price", "unit price", "£"]),
+    yieldPct: find(["yield", "yield %"]),
+  };
+}
+
+function _renderSheetImportModal() {
+  const s = _sheetImportState;
+  if (!s) return;
+  const existing = document.getElementById("sheet-import-modal");
+  if (existing) existing.remove();
+
+  const modal = document.createElement("div");
+  modal.id = "sheet-import-modal";
+  modal.className = "modal-overlay";
+
+  const kindLbl = s.kind === "suppliers" ? "Suppliers" : "Ingredients";
+  const fields =
+    s.kind === "suppliers"
+      ? [
+          { key: "name", label: "Supplier Name", required: true },
+          { key: "email", label: "Email", required: false },
+          { key: "phone", label: "Phone", required: false },
+          { key: "notes", label: "Notes / Address", required: false },
+        ]
+      : [
+          { key: "name", label: "Ingredient Name", required: true },
+          { key: "category", label: "Category", required: false },
+          { key: "packSize", label: "Pack Size", required: false },
+          { key: "packCount", label: "Pack Count", required: false },
+          { key: "unit", label: "Unit", required: false },
+          { key: "packCost", label: "Pack Cost", required: true },
+          { key: "yieldPct", label: "Yield %", required: false },
+        ];
+
+  const mapRows = fields
+    .map((f) => {
+      const options =
+        '<option value="">— not mapped —</option>' +
+        s.headers
+          .map(
+            (h) =>
+              '<option value="' +
+              escAttr(h) +
+              '"' +
+              (s.mapping[f.key] === h ? " selected" : "") +
+              ">" +
+              escHtml(h) +
+              "</option>",
+          )
+          .join("");
+      return (
+        '<div class="form-group" style="margin:0;flex:1;min-width:160px"><label style="font-size:11px">' +
+        escHtml(f.label) +
+        (f.required ? ' <span style="color:var(--red)">*</span>' : "") +
+        '</label><select onchange="_sheetImportState.mapping[\'' +
+        f.key +
+        "']=this.value;_renderSheetImportPreview()\">" +
+        options +
+        "</select></div>"
+      );
+    })
+    .join("");
+
+  modal.innerHTML =
+    '<div class="modal" style="width:900px;max-height:90vh;display:flex;flex-direction:column">' +
+    '<div class="modal-header"><h2>📥 Import ' +
+    kindLbl +
+    ' from File</h2><button class="modal-close" onclick="closeSheetImportModal()">✕</button></div>' +
+    '<div class="modal-body" style="flex:1;overflow-y:auto">' +
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">📄 ' +
+    escHtml(s.fileName) +
+    " — " +
+    s.rows.length +
+    ' rows detected</div>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
+    mapRows +
+    "</div>" +
+    '<div id="sheet-import-preview"></div>' +
+    "</div>" +
+    '<div class="modal-footer" style="justify-content:flex-end">' +
+    '<button class="btn-secondary" onclick="closeSheetImportModal()">Cancel</button>' +
+    '<button class="btn-primary" id="sheet-import-apply-btn" onclick="applySheetImport()" disabled>Import</button>' +
+    "</div></div>";
+  document.body.appendChild(modal);
+  _renderSheetImportPreview();
+}
+
+function closeSheetImportModal() {
+  const el = document.getElementById("sheet-import-modal");
+  if (el) el.remove();
+  _sheetImportState = null;
+}
+
+function _renderSheetImportPreview() {
+  const s = _sheetImportState;
+  if (!s) return;
+  const preview = document.getElementById("sheet-import-preview");
+  const btn = document.getElementById("sheet-import-apply-btn");
+  const m = s.mapping;
+  const needed = s.kind === "suppliers" ? ["name"] : ["name", "packCost"];
+  const ok = needed.every((k) => m[k]);
+  if (!ok) {
+    preview.innerHTML =
+      '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Map the required columns above to see a preview.</div>';
+    btn.disabled = true;
+    return;
+  }
+
+  const parsed = _parseSheetRows(s);
+  s.parsed = parsed;
+  const valid = parsed.filter((p) => p.valid);
+  const dupes = parsed.filter((p) => p.duplicate);
+  btn.disabled = valid.length === 0;
+  btn.textContent =
+    "Import " + valid.length + " " + (s.kind === "suppliers" ? "supplier" : "ingredient") + (valid.length === 1 ? "" : "s");
+
+  const headerCells =
+    s.kind === "suppliers"
+      ? "<th>Name</th><th>Email</th><th>Phone</th><th>Status</th>"
+      : "<th>Name</th><th>Category</th><th>Pack</th><th>Cost</th><th>Status</th>";
+
+  const bodyRows = parsed
+    .slice(0, 50)
+    .map((p) => {
+      if (s.kind === "suppliers") {
+        return (
+          "<tr" +
+          (p.duplicate ? ' style="opacity:.55"' : "") +
+          "><td>" +
+          escHtml(p.data.name || "—") +
+          "</td><td>" +
+          escHtml(p.data.email || "—") +
+          "</td><td>" +
+          escHtml(p.data.phone || "—") +
+          '</td><td style="font-size:10px">' +
+          (p.duplicate
+            ? '<span style="color:var(--amber)">duplicate</span>'
+            : p.valid
+              ? '<span style="color:var(--green)">new</span>'
+              : '<span style="color:var(--red)">' + escHtml(p.error || "invalid") + "</span>") +
+          "</td></tr>"
+        );
+      }
+      const d = p.data;
+      const packStr =
+        d.packCount && d.packCount > 1
+          ? d.packCount + "×" + d.packSize / d.packCount + (d.unit || "")
+          : (d.packSize || "—") + " " + (d.unit || "");
+      return (
+        "<tr" +
+        (p.duplicate ? ' style="opacity:.55"' : "") +
+        "><td>" +
+        escHtml(d.name || "—") +
+        "</td><td>" +
+        escHtml(d.category || "—") +
+        "</td><td>" +
+        escHtml(packStr) +
+        "</td><td>" +
+        fmt(d.packCost || 0) +
+        '</td><td style="font-size:10px">' +
+        (p.duplicate
+          ? '<span style="color:var(--amber)">duplicate</span>'
+          : p.valid
+            ? '<span style="color:var(--green)">new</span>'
+            : '<span style="color:var(--red)">' + escHtml(p.error || "invalid") + "</span>") +
+        "</td></tr>"
+      );
+    })
+    .join("");
+
+  preview.innerHTML =
+    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">' +
+    valid.length +
+    " ready · " +
+    dupes.length +
+    " duplicate" +
+    (dupes.length !== 1 ? "s" : "") +
+    " skipped · " +
+    (parsed.length - valid.length - dupes.length) +
+    " invalid" +
+    (parsed.length > 50 ? " (showing first 50 of " + parsed.length + ")" : "") +
+    "</div>" +
+    '<div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:4px">' +
+    '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead style="position:sticky;top:0;background:var(--bg-sidebar)"><tr>' +
+    headerCells +
+    "</tr></thead><tbody>" +
+    bodyRows +
+    "</tbody></table></div>";
+}
+
+function _parseSheetRows(s) {
+  const m = s.mapping;
+  const existingIngNames = new Set(
+    state.ingredients.map((i) => (i.name || "").toLowerCase()),
+  );
+  const existingSupNames = new Set(
+    state.suppliers.map((s2) => (s2.name || "").toLowerCase()),
+  );
+  return s.rows.map((row) => {
+    if (s.kind === "suppliers") {
+      const name = String(row[m.name] || "").trim();
+      if (!name) return { valid: false, error: "no name", data: {} };
+      const data = {
+        name,
+        email: m.email ? String(row[m.email] || "").trim() : "",
+        phone: m.phone ? String(row[m.phone] || "").trim() : "",
+        notes: m.notes ? String(row[m.notes] || "").trim() : "",
+      };
+      const duplicate = existingSupNames.has(name.toLowerCase());
+      return { valid: !duplicate, duplicate, data };
+    }
+    // ingredients
+    const name = String(row[m.name] || "").trim();
+    if (!name) return { valid: false, error: "no name", data: {} };
+    const packCostRaw = String(row[m.packCost] || "").replace(/[£$€,]/g, "").trim();
+    const packCost = parseFloat(packCostRaw);
+    if (!isFinite(packCost) || packCost <= 0) {
+      return { valid: false, error: "no price", data: { name } };
+    }
+    const packCountRaw = m.packCount
+      ? parseInt(String(row[m.packCount] || "").replace(/[^0-9]/g, ""))
+      : NaN;
+    const packCount = isFinite(packCountRaw) && packCountRaw > 0 ? packCountRaw : 1;
+    const packSizeRaw = m.packSize
+      ? parseFloat(String(row[m.packSize] || "").replace(/[^0-9.]/g, ""))
+      : NaN;
+    const packSize = isFinite(packSizeRaw) && packSizeRaw > 0 ? packSizeRaw : 1;
+    const unit = m.unit ? String(row[m.unit] || "").trim().toLowerCase() : "each";
+    const category = m.category
+      ? String(row[m.category] || "").trim()
+      : guessIngCategory(name) || "Other";
+    const yieldPct = m.yieldPct ? parseFloat(String(row[m.yieldPct] || "")) || 100 : 100;
+    const data = {
+      name,
+      category,
+      packSize: packCount > 1 ? packSize * packCount : packSize,
+      packCount,
+      packCost,
+      unit: unit || "each",
+      yieldPct,
+    };
+    const duplicate = existingIngNames.has(name.toLowerCase());
+    return { valid: !duplicate, duplicate, data };
+  });
+}
+
+function applySheetImport() {
+  const s = _sheetImportState;
+  if (!s || !s.parsed) return;
+  const toAdd = s.parsed.filter((p) => p.valid);
+  if (!toAdd.length) {
+    showToast("Nothing to import", "error");
+    return;
+  }
+  if (s.kind === "suppliers") {
+    toAdd.forEach((p) => {
+      state.suppliers.push({
+        id: "sup_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+        name: p.data.name,
+        email: p.data.email || "",
+        phone: p.data.phone || "",
+        notes: p.data.notes || "",
+        invoiceHistory: [],
+      });
+    });
+    save();
+    renderSupplierList();
+    showToast("✓ Imported " + toAdd.length + " suppliers", "success", 3000);
+  } else {
+    const allergens = typeof detectAllergens === "function" ? detectAllergens : () => [];
+    toAdd.forEach((p) => {
+      state.ingredients.push({
+        id: "ing_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+        name: p.data.name,
+        category: p.data.category,
+        packSize: p.data.packSize,
+        packCount: p.data.packCount,
+        packCost: p.data.packCost,
+        unit: p.data.unit,
+        yieldPct: p.data.yieldPct,
+        allergens: allergens(p.data.name),
+        nutrition: {},
+        priceHistory: [],
+        altSuppliers: [],
+      });
+    });
+    save();
+    renderIngredientLibrary();
+    showToast("✓ Imported " + toAdd.length + " ingredients", "success", 3000);
+  }
+  closeSheetImportModal();
 }
 
 function toggleDarkMode() {
@@ -2900,6 +3258,13 @@ async function save() {
   }
 }
 
+function _getActiveLocationSlug() {
+  try {
+    const loc = (state.locations || []).find(l => l.id === state.activeLocationId);
+    return loc && loc.name ? loc.name : '';
+  } catch (e) { return ''; }
+}
+
 let _autoSyncDebounce = null;
 function _autoSyncToCloud() {
   try {
@@ -2923,7 +3288,7 @@ function _autoSyncToCloud() {
       deviceName: _getDeviceName(),
       dataTimestamp: state._lastEditTimestamp || new Date().toISOString()
     };
-    window.electronAPI.syncBackupToFolder(s.folder, data).then(function(res) {
+    window.electronAPI.syncBackupToFolder(s.folder, data, _getActiveLocationSlug()).then(function(res) {
       if (res && !res.error) {
         s.lastSync = new Date().toISOString();
         _saveSyncSettings(s);
@@ -6290,6 +6655,9 @@ function _filterRecipeIngredients() {
 function refreshCostPanel() {
   const recipe = getActiveRecipe();
   if (!recipe) return;
+  // Invalidate cached costs — qty/unit/waste/price edits have just mutated state,
+  // and recipeTotalCost() would otherwise return the stale cached value.
+  invalidateCostCache();
   const totalCost = recipeTotalCost(recipe);
   const portions = recipe.portions || 1;
   const costPerPortion = totalCost / portions;
@@ -6336,6 +6704,13 @@ function refreshCostPanel() {
   }
   const pc = document.getElementById("price-comparison");
   if (pc) pc.innerHTML = buildPriceComparison(costPerPortion);
+
+  // Refresh sticky top cost bar so it reflects the new total/portion cost
+  const bar = document.getElementById("sticky-cost-bar");
+  if (bar && typeof buildStickyCostBar === "function") {
+    const foodCostPct = sugPrice > 0 ? (costPerPortion / sugPrice) * 100 : 0;
+    bar.outerHTML = buildStickyCostBar(recipe, costPerPortion, sugPrice, foodCostPct);
+  }
 }
 
 // ─── Drag & Drop Reorder ──────────────────────────────────────
@@ -7717,7 +8092,9 @@ function _ingBuildRow(ing) {
     </td>
     <td style="font-weight:600;cursor:pointer" onclick="openIngredientModal('${ing.id}')" title="Edit ingredient" class="ing-name-cell">${highlightMatch(ing.name, _hlQ)}</td>
     <td><span class="cat-badge">${highlightMatch(ing.category, _hlQ)}</span></td>
-    <td>${ing.packSize} ${ing.unit}</td>
+    <td>${(ing.packCount && ing.packCount > 1)
+      ? `${ing.packCount} × ${(ing.packSize / ing.packCount)}${ing.unit} <span style="color:var(--text-muted);font-size:10px">(${ing.packSize}${ing.unit})</span>`
+      : `${ing.packSize} ${ing.unit}`}</td>
     <td>
       <span class="ing-price-editable" onclick="openIngPriceEdit('${ing.id}',this)" title="Click to edit price">
         ${fmt(ing.packCost)}
@@ -7956,6 +8333,10 @@ function openIngredientModal(id = null, prefillName = "") {
     document.getElementById("ing-name").value = ing.name;
     document.getElementById("ing-category").value = ing.category;
     document.getElementById("ing-pack-size").value = ing.packSize;
+    document.getElementById("ing-pack-count").value = ing.packCount || 1;
+    document.getElementById("ing-unit-size").value = ing.packCount && ing.packCount > 1
+      ? (ing.packSize / ing.packCount)
+      : ing.packSize;
     document.getElementById("ing-unit").value = ing.unit;
     document.getElementById("ing-pack-cost").value = ing.packCost;
     document.getElementById("ing-yield").value = ing.yieldPct || 100;
@@ -7972,13 +8353,17 @@ function openIngredientModal(id = null, prefillName = "") {
     [
       "ing-name",
       "ing-pack-size",
+      "ing-unit-size",
       "ing-pack-cost",
       "ing-kcal",
       "ing-protein",
       "ing-fat",
       "ing-carbs",
     ].forEach((x) => (document.getElementById(x).value = ""));
+    document.getElementById("ing-pack-count").value = 1;
     document.getElementById("ing-yield").value = 100;
+    const hintEl = document.getElementById("ing-pack-hint");
+    if (hintEl) hintEl.textContent = "";
     // Pre-fill name from search term if provided
     if (prefillName) {
       document.getElementById("ing-name").value = prefillName;
@@ -7993,6 +8378,12 @@ function openIngredientModal(id = null, prefillName = "") {
   ["ing-pack-size", "ing-pack-cost", "ing-yield"].forEach((x) => {
     document.getElementById(x).oninput = updateCostPreview;
   });
+  ["ing-pack-count", "ing-unit-size"].forEach((x) => {
+    document.getElementById(x).oninput = recalcPackSizeFromCount;
+  });
+  document.getElementById("ing-unit").onchange = recalcPackSizeFromCount;
+  // Initial hint render when editing
+  if (id) recalcPackSizeFromCount();
   // Focus name field if new, otherwise focus first empty field
   setTimeout(() => {
     const nameEl = document.getElementById("ing-name");
@@ -8085,6 +8476,26 @@ function getSelectedAllergens() {
   return [...document.querySelectorAll("#allergen-grid input:checked")].map(
     (c) => c.value,
   );
+}
+
+function recalcPackSizeFromCount() {
+  const count = Math.max(1, parseInt(document.getElementById("ing-pack-count").value) || 1);
+  const unitSize = parseFloat(document.getElementById("ing-unit-size").value) || 0;
+  const sizeEl = document.getElementById("ing-pack-size");
+  const hint = document.getElementById("ing-pack-hint");
+  const unit = document.getElementById("ing-unit").value;
+  if (unitSize > 0) {
+    const total = count * unitSize;
+    sizeEl.value = total;
+    if (hint) {
+      hint.textContent = count > 1
+        ? `${count} × ${unitSize}${unit} = ${total}${unit} total`
+        : `1 × ${unitSize}${unit} (single pack)`;
+    }
+  } else if (hint) {
+    hint.textContent = "";
+  }
+  updateCostPreview();
 }
 
 function updateCostPreview() {
@@ -8199,6 +8610,10 @@ function saveIngredient() {
     packSize: Math.max(
       0,
       parseFloat(document.getElementById("ing-pack-size").value) || 0,
+    ),
+    packCount: Math.max(
+      1,
+      parseInt(document.getElementById("ing-pack-count").value) || 1,
     ),
     packCost: newPackCost,
     unit: document.getElementById("ing-unit").value,
@@ -9269,7 +9684,7 @@ function exportDashboardPDF() {
   <script>window.onload=function(){window.print()}<\/script>
   </body></html>`;
 
-  browserIPC.exportPDF(html);
+  browserIPC.exportPDF(html, `cost-dashboard-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ─── Batch PDF Report (all recipes in one document) ──────────
@@ -9378,7 +9793,7 @@ function exportBatchPDF() {
     + '<div style="font-size:12px;color:#888;margin-top:4px">' + sellable.length + ' recipes · ' + date + ' · Target GP ' + gp + '%</div></div>'
     + pages + '</body></html>';
 
-  browserIPC.exportPDF(html);
+  browserIPC.exportPDF(html, `recipe-cost-report-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ─── Kitchen View ────────────────────────────────────────────────────────────
@@ -10374,7 +10789,8 @@ function exportMenuPDF() {
 </body></html>`;
 
   document.getElementById("menu-modal").classList.add("hidden");
-  browserIPC.exportPDF(html);
+  const _menuTitle = (document.getElementById("menu-title-input").value || "menu").replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "menu";
+  browserIPC.exportPDF(html, `${_menuTitle}-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ─── Menu Excel Export ────────────────────────────────────────
@@ -10745,7 +11161,8 @@ function printRecipe(id) {
   </div>
 </body></html>`;
 
-  browserIPC.exportPDF(html);
+  const _rcSafe = (recipe.name || "recipe").replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "recipe";
+  browserIPC.exportPDF(html, `recipe-cost-${_rcSafe}-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ─── Export All Recipes Excel ──────────────────────────────────
@@ -12372,6 +12789,17 @@ function buildInvoiceHistory(sup) {
     );
   }
 
+  // Sort invoices within each month by date descending (newest first)
+  Object.keys(months).forEach(function(k) {
+    months[k].invoices.sort(function(a, b) {
+      var ad = a.date || '';
+      var bd = b.date || '';
+      if (ad !== bd) return ad < bd ? 1 : -1;
+      // Tie-breaker: scannedAt so deterministic
+      return (b.scannedAt || '').localeCompare(a.scannedAt || '');
+    });
+  });
+
   var monthSections = sortedKeys.map(function(key, idx) {
     var m = months[key];
     var monthTotal = m.total;
@@ -12801,16 +13229,32 @@ function populateSupplierDropdown(selectedId) {
 }
 
 // ─── Price History ─────────────────────────────────────────────
-function logPriceChange(ing, oldCost, newCost) {
+function logPriceChange(ing, oldCost, newCost, sourceDate, applied) {
   if (!ing.priceHistory) ing.priceHistory = [];
-  // Always log — even if price unchanged, records that it was verified
+  // sourceDate = the real invoice date (YYYY-MM-DD); falls back to today.
+  // applied = whether this price actually became the ingredient's current price.
   ing.priceHistory.push({
-    date: new Date().toISOString().slice(0, 10),
+    date: sourceDate || new Date().toISOString().slice(0, 10),
+    loggedAt: new Date().toISOString(),
     packCost: oldCost,
     newCost: newCost,
     change: newCost - oldCost,
     confirmed: oldCost === newCost,
+    applied: applied !== false,
   });
+}
+
+// Returns the most recent "applied" price-history entry date (YYYY-MM-DD) or null.
+function latestAppliedPriceDate(ing) {
+  const hist = ing.priceHistory || [];
+  let latest = null;
+  for (const h of hist) {
+    if (h.applied === false) continue;
+    const d = h.date;
+    if (!d) continue;
+    if (!latest || d > latest) latest = d;
+  }
+  return latest;
 }
 
 // ─── Price Change Impact Alert ─────────────────────────────────
@@ -13414,7 +13858,7 @@ async function runSyncNow() {
       deviceName: _getDeviceName(),
       dataTimestamp: state._lastEditTimestamp || new Date().toISOString()
     };
-    const result = await window.electronAPI.syncBackupToFolder(s.folder, data);
+    const result = await window.electronAPI.syncBackupToFolder(s.folder, data, _getActiveLocationSlug());
     if (result.error) {
       showToast('Sync failed: ' + result.error, 'error', 4000);
       if (statusEl) statusEl.textContent = 'Last sync failed: ' + result.error;
@@ -13458,7 +13902,7 @@ async function _renderSyncUI() {
     // Load cloud backup list
     if (listEl) {
       try {
-        const backups = await window.electronAPI.listSyncBackups(s.folder);
+        const backups = await window.electronAPI.listSyncBackups(s.folder, _getActiveLocationSlug());
         if (backups.length) {
           listEl.innerHTML = backups.slice(0, 10).map(function(b) {
             const date = new Date(b.mtime).toLocaleString();
@@ -13489,7 +13933,7 @@ async function _checkSyncOnStartup() {
     var s = _getSyncSettings();
     if (!s.folder) return; // no sync folder configured
 
-    var backups = await window.electronAPI.listSyncBackups(s.folder);
+    var backups = await window.electronAPI.listSyncBackups(s.folder, _getActiveLocationSlug());
     if (!backups || !backups.length) return; // no backups in folder
 
     // Get the newest backup
@@ -13497,7 +13941,7 @@ async function _checkSyncOnStartup() {
     if (!newest) return;
 
     // Read the newest backup to check its metadata
-    var result = await window.electronAPI.restoreSyncBackup(s.folder, newest.name);
+    var result = await window.electronAPI.restoreSyncBackup(s.folder, newest.name, _getActiveLocationSlug());
     if (!result || result.error || !result.data) return;
 
     var remoteData = result.data;
@@ -13619,7 +14063,7 @@ async function _syncPromptLoadRemote(filename) {
   if (!s.folder) return;
 
   try {
-    var result = await window.electronAPI.restoreSyncBackup(s.folder, filename);
+    var result = await window.electronAPI.restoreSyncBackup(s.folder, filename, _getActiveLocationSlug());
     if (result.error) { showToast('Sync restore failed: ' + result.error, 'error', 4000); return; }
     var data = result.data;
     if (data.recipes) state.recipes = data.recipes;
@@ -13645,7 +14089,7 @@ async function restoreSyncBackup(filename) {
   if (!s.folder) return;
   if (!confirm('Restore from cloud backup "' + filename + '"?\n\nThis will replace all current data. A local backup will be made first.')) return;
   try {
-    const result = await window.electronAPI.restoreSyncBackup(s.folder, filename);
+    const result = await window.electronAPI.restoreSyncBackup(s.folder, filename, _getActiveLocationSlug());
     if (result.error) { showToast('Restore failed: ' + result.error, 'error', 4000); return; }
     // Apply the data
     const data = result.data;
@@ -15610,6 +16054,18 @@ function applyInvoiceUpdates() {
     document.getElementById("invoice-modal").dataset.supplierId || null;
   const isCredit = document.getElementById("inv-credit-note")?.checked || false;
 
+  // Capture invoice date up-front so we can decide whether to overwrite prices
+  // with data from older invoices.
+  const _invDateRaw = (document.getElementById("inv-date").value || "").trim();
+  const _invoiceDate =
+    _invDateRaw &&
+    _invDateRaw !== "undefined" &&
+    _invDateRaw !== "null" &&
+    !isNaN(new Date(_invDateRaw))
+      ? _invDateRaw
+      : new Date().toISOString().slice(0, 10);
+  let _stalePriceCount = 0;
+
   const priceAlerts = []; // track rises for summary
   const cheaperAltCandidates = []; // track newly-added alts that are cheaper than primary
   invoiceResults.forEach(function (item) {
@@ -15628,25 +16084,36 @@ function applyInvoiceUpdates() {
 
         if (isDefaultSupplier) {
           // ── Default supplier → update main ingredient price ──
+          // BUT only if this invoice is newer than the last applied price.
+          // Older invoices still get logged, but don't overwrite the current price.
           const oldCost = ing.packCost;
-          logPriceChange(ing, oldCost, newCost);
-          if (oldCost > 0 && newCost > 0 && newCost !== oldCost) {
-            const pctChange = ((newCost - oldCost) / oldCost) * 100;
-            priceAlerts.push({
-              name: ing.name,
-              oldCost,
-              newCost,
-              pctChange,
-              oldPackSize: ing.packSize,
-              newPackSize: newPackSize,
-              unit: ing.unit,
-            });
+          const lastAppliedDate = latestAppliedPriceDate(ing);
+          const _isStale = lastAppliedDate && _invoiceDate < lastAppliedDate;
+          if (_isStale) {
+            _stalePriceCount++;
+            // Log historical entry but don't overwrite current price
+            logPriceChange(ing, oldCost, newCost, _invoiceDate, false);
+          } else {
+            logPriceChange(ing, oldCost, newCost, _invoiceDate, true);
+            if (oldCost > 0 && newCost > 0 && newCost !== oldCost) {
+              const pctChange = ((newCost - oldCost) / oldCost) * 100;
+              priceAlerts.push({
+                name: ing.name,
+                oldCost,
+                newCost,
+                pctChange,
+                oldPackSize: ing.packSize,
+                newPackSize: newPackSize,
+                unit: ing.unit,
+              });
+            }
+            ing.packCost = newCost;
+            if (item.packSize) ing.packSize = item.packSize;
+            if (supplierId && !ing.supplierId) ing.supplierId = supplierId;
           }
-          ing.packCost = newCost;
-          if (item.packSize) ing.packSize = item.packSize;
-          if (supplierId && !ing.supplierId) ing.supplierId = supplierId;
         } else if (item.setAsPrimary) {
           // ── User explicitly chose to promote this supplier to primary ──
+          // This is an explicit user choice, so we honor it regardless of date.
           const _oldPrimary = {
             supplierId: ing.supplierId,
             packSize: ing.packSize,
@@ -15664,7 +16131,7 @@ function applyInvoiceUpdates() {
           ing.supplierId = supplierId;
           ing.packCost = newCost;
           if (item.packSize) ing.packSize = item.packSize;
-          logPriceChange(ing, oldCost, newCost);
+          logPriceChange(ing, oldCost, newCost, _invoiceDate, true);
           if (oldCost > 0 && newCost > 0 && newCost !== oldCost) {
             priceAlerts.push({
               name: ing.name,
@@ -15897,6 +16364,13 @@ function applyInvoiceUpdates() {
           ? "s"
           : "") +
         " detected",
+    );
+  if (_stalePriceCount)
+    parts.push(
+      _stalePriceCount +
+        " older invoice line" +
+        (_stalePriceCount !== 1 ? "s" : "") +
+        " logged (current price kept)",
     );
   showToast(
     (isCredit ? "✓ Credit note applied: " : "✓ ") + (parts.join(" · ") || "No changes"),
@@ -16533,7 +17007,8 @@ async function printBatchSheet() {
     '</div><div class="kl">Cost / Cover</div></div>' +
     "</div></body></html>";
 
-  browserIPC.exportPDF(html);
+  const _batSafe = (recipe.name || "batch").replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "batch";
+  browserIPC.exportPDF(html, `batch-sheet-${_batSafe}-${covers}x-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ─── Allergen Compliance Report ────────────────────────────────
@@ -16692,7 +17167,7 @@ async function printAllergenReport() {
     '<div class="legend">✓ = Contains allergen &nbsp;&nbsp; — = Not present &nbsp;&nbsp; Always verify with your supplier</div>' +
     "</body></html>";
 
-  browserIPC.exportPDF(html);
+  browserIPC.exportPDF(html, `allergen-report-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -17065,7 +17540,8 @@ async function printMenuCard() {
     legendHtml +
     `</body></html>`;
 
-  browserIPC.exportPDF(html);
+  const _mpSafe = menuTitle.replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "menu";
+  browserIPC.exportPDF(html, `menu-card-${_mpSafe}-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -18445,7 +18921,8 @@ async function printAllergenQRCard(id) {
     + '<script>window.onload=function(){window.print()}<\/script>'
     + '</body></html>';
 
-  browserIPC.exportPDF(html);
+  const _aqrSafe = (recipe.name || "recipe").replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "recipe";
+  browserIPC.exportPDF(html, `allergen-qr-${_aqrSafe}.pdf`);
 }
 
 async function printBatchAllergenQR() {
@@ -18516,7 +18993,7 @@ async function printBatchAllergenQR() {
     + '<script>window.onload=function(){window.print()}<\/script>'
     + '</body></html>';
 
-  browserIPC.exportPDF(html);
+  browserIPC.exportPDF(html, `allergen-qr-cards-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ─── Recipe Tags ──────────────────────────────────────────────
@@ -21040,7 +21517,8 @@ function exportKitchenSheetPDF(title, recipes, catOrder, opts) {
   ${sections}${orderSection}
   </body></html>`;
 
-  browserIPC.exportPDF(html);
+  const _ksSafe = (title || "kitchen-sheet").replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "kitchen-sheet";
+  browserIPC.exportPDF(html, `kitchen-sheet-${_ksSafe}-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 async function exportKitchenSheetExcel(title, recipes, catOrder, opts) {
@@ -21712,5 +22190,5 @@ function printOrderSheet() {
   <div class="date">Date: ${dateVal}</div>
   ${content.innerHTML}
   </body></html>`;
-  eAPI.exportPDF(html);
+  eAPI.exportPDF(html, `order-sheet-${dateVal}.pdf`);
 }

@@ -608,7 +608,8 @@
           <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">🧂 Ingredients</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn-secondary btn-sm" onclick="exportIngredients()">⬇ Export Ingredients</button>
-            <button class="btn-secondary btn-sm" onclick="importIngredientsFromFile()">⬆ Import Ingredients</button>
+            <button class="btn-secondary btn-sm" onclick="importIngredientsFromFile()">⬆ Import (JSON)</button>
+            <button class="btn-secondary btn-sm" onclick="importIngredientsFromSpreadsheet()" title="Import from Excel or CSV with column mapping">📥 Import (Excel/CSV)</button>
           </div>
           <div id="ing-import-status" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
         </div>
@@ -618,7 +619,8 @@
           <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">🚚 Suppliers <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(includes invoice history)</span></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn-secondary btn-sm" onclick="exportSuppliers()">⬇ Export Suppliers</button>
-            <button class="btn-secondary btn-sm" onclick="importSuppliersFromFile()">⬆ Import Suppliers</button>
+            <button class="btn-secondary btn-sm" onclick="importSuppliersFromFile()">⬆ Import (JSON)</button>
+            <button class="btn-secondary btn-sm" onclick="importSuppliersFromSpreadsheet()" title="Import from Excel or CSV with column mapping">📥 Import (Excel/CSV)</button>
           </div>
           <div id="sup-import-status" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
         </div>
@@ -823,11 +825,15 @@
         </div>
       </div>
 
-      <!-- Row 3: Pack size + unit + pack cost + yield in one row -->
-      <div style="display:grid;grid-template-columns:1fr 100px 1fr 100px;gap:10px;margin-bottom:12px">
+      <!-- Row 3a: Pack count + unit size → total size -->
+      <div style="display:grid;grid-template-columns:90px 1fr 90px 1fr;gap:10px;margin-bottom:8px;align-items:end">
         <div class="form-group" style="margin:0">
-          <label>Pack size</label>
-          <input type="number" id="ing-pack-size" placeholder="e.g. 1000" min="0" step="any"></input>
+          <label title="How many units inside the pack (e.g. 6 tins)">Pack count</label>
+          <input type="number" id="ing-pack-count" placeholder="1" min="1" step="1" value="1"></input>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label title="Size of ONE unit (e.g. one tin = 400g)">Size per unit</label>
+          <input type="number" id="ing-unit-size" placeholder="e.g. 400" min="0" step="any"></input>
         </div>
         <div class="form-group" style="margin:0">
           <label>Unit</label>
@@ -838,6 +844,15 @@
             <option value="tbsp">tbsp</option><option value="tsp">tsp</option>
           </select>
         </div>
+        <div class="form-group" style="margin:0">
+          <label>Total pack size <span style="color:var(--text-muted);font-weight:400">(auto)</span></label>
+          <input type="number" id="ing-pack-size" placeholder="auto" min="0" step="any"></input>
+        </div>
+      </div>
+      <div id="ing-pack-hint" style="font-size:10px;color:var(--text-muted);margin-bottom:10px;min-height:12px"></div>
+
+      <!-- Row 3b: Pack cost + yield -->
+      <div style="display:grid;grid-template-columns:1fr 120px;gap:10px;margin-bottom:12px">
         <div class="form-group" style="margin:0">
           <label>Pack cost (£) *</label>
           <input type="number" id="ing-pack-cost" placeholder="e.g. 4.50" min="0" step="0.01"></input>

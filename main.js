@@ -245,48 +245,76 @@ ipcMain.handle('choose-sync-folder', async () => {
   return filePaths[0];
 });
 
-ipcMain.handle('sync-backup-to-folder', async (_, { folderPath, data }) => {
+// Sanitize a location label into a safe folder name.
+function _sanitizeLocationSlug(slug) {
+  if (!slug) return '';
+  return String(slug)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')  // strip illegal path chars
+    .replace(/\s+/g, '-')
+    .replace(/\.+$/g, '')                    // trailing dots (Windows)
+    .slice(0, 80);
+}
+
+// Resolve the target folder for a given base folder + optional location slug.
+// If a slug is provided, the backup is placed in folderPath/<slug>/ which is
+// created on demand. Callers that don't pass a slug keep the legacy behavior.
+function _resolveSyncTarget(folderPath, locationSlug) {
+  if (!folderPath || !fs.existsSync(folderPath)) return null;
+  const safeSlug = _sanitizeLocationSlug(locationSlug);
+  if (!safeSlug) return folderPath;
+  const sub = path.join(folderPath, safeSlug);
+  if (!fs.existsSync(sub)) fs.mkdirSync(sub, { recursive: true });
+  return sub;
+}
+
+ipcMain.handle('sync-backup-to-folder', async (_, { folderPath, data, locationSlug }) => {
   try {
-    if (!folderPath || !fs.existsSync(folderPath)) return { error: 'Sync folder not found' };
+    const targetFolder = _resolveSyncTarget(folderPath, locationSlug);
+    if (!targetFolder) return { error: 'Sync folder not found' };
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const filename = 'recipe-costing-backup-' + stamp + '.json';
-    const dest = path.join(folderPath, filename);
+    const dest = path.join(targetFolder, filename);
     fs.writeFileSync(dest, JSON.stringify(data, null, 2), 'utf8');
 
-    // Keep only last 10 sync backups in the folder
-    const allBackups = fs.readdirSync(folderPath)
+    // Keep only last 10 sync backups in the target (per-location) folder
+    const allBackups = fs.readdirSync(targetFolder)
       .filter(f => f.startsWith('recipe-costing-backup-') && f.endsWith('.json'))
       .sort()
       .reverse();
     if (allBackups.length > 10) {
       allBackups.slice(10).forEach(f => {
-        try { fs.unlinkSync(path.join(folderPath, f)); } catch(e) {}
+        try { fs.unlinkSync(path.join(targetFolder, f)); } catch(e) {}
       });
     }
-    return { ok: true, path: dest, filename };
+    return { ok: true, path: dest, filename, folder: targetFolder };
   } catch(e) {
     return { error: e.message };
   }
 });
 
-ipcMain.handle('list-sync-backups', async (_, folderPath) => {
+ipcMain.handle('list-sync-backups', async (_, arg) => {
   try {
-    if (!folderPath || !fs.existsSync(folderPath)) return [];
-    return fs.readdirSync(folderPath)
+    // Backwards-compat: older renderer passed the folderPath string directly.
+    const folderPath = typeof arg === 'string' ? arg : (arg && arg.folderPath);
+    const locationSlug = typeof arg === 'object' && arg ? arg.locationSlug : '';
+    const targetFolder = _resolveSyncTarget(folderPath, locationSlug);
+    if (!targetFolder) return [];
+    return fs.readdirSync(targetFolder)
       .filter(f => f.startsWith('recipe-costing-backup-') && f.endsWith('.json'))
       .sort()
       .reverse()
       .map(f => {
-        const stat = fs.statSync(path.join(folderPath, f));
+        const stat = fs.statSync(path.join(targetFolder, f));
         return { name: f, size: stat.size, mtime: stat.mtime.toISOString() };
       });
   } catch(e) { return []; }
 });
 
-ipcMain.handle('restore-sync-backup', async (_, { folderPath, filename }) => {
+ipcMain.handle('restore-sync-backup', async (_, { folderPath, filename, locationSlug }) => {
   try {
     if (!/^recipe-costing-backup-[\d\-T]+\.json$/.test(filename)) throw new Error('Invalid filename');
-    const src = path.join(folderPath, filename);
+    const targetFolder = _resolveSyncTarget(folderPath, locationSlug) || folderPath;
+    const src = path.join(targetFolder, filename);
     if (!fs.existsSync(src)) throw new Error('Backup not found');
     const raw = fs.readFileSync(src, 'utf8');
     return { data: JSON.parse(raw) };
@@ -362,10 +390,14 @@ ipcMain.handle('build-and-save-excel', async (_, { sheets, defaultName }) => {
   }
 });
 
-ipcMain.handle('export-pdf', async (_, htmlContent) => {
+ipcMain.handle('export-pdf', async (_, arg) => {
+  // Accept either a bare html string (legacy) or { html, defaultName } (current)
+  const htmlContent = typeof arg === 'string' ? arg : (arg && arg.html) || '';
+  const rawName = (arg && arg.defaultName) || 'recipe-cost-sheet.pdf';
+  const defaultName = /\.pdf$/i.test(rawName) ? rawName : rawName + '.pdf';
   const { filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: 'Save Recipe Cost Sheet',
-    defaultPath: 'recipe-cost-sheet.pdf',
+    title: 'Save PDF',
+    defaultPath: defaultName,
     filters: [{ name: 'PDF', extensions: ['pdf'] }]
   });
   if (!filePath) return false;

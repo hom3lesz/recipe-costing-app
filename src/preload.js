@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDataPath: ()      => ipcRenderer.invoke('get-data-path'),
 
   // ── File dialogs ────────────────────────────────────────────
-  exportPDF:   (html)       => ipcRenderer.invoke('export-pdf', html),
+  exportPDF:   (html, defaultName) => ipcRenderer.invoke('export-pdf', { html, defaultName }),
   saveExcel:           (arr, name)    => ipcRenderer.invoke('save-excel', { buffer: arr, defaultName: name }),
   buildAndSaveExcel:   (sheets, name) => ipcRenderer.invoke('build-and-save-excel', { sheets, defaultName: name }),
   openExcel:   ()           => ipcRenderer.invoke('open-excel'),
@@ -54,10 +54,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generateQR: (text, opts) => QRCode.toDataURL(text, { width: (opts && opts.width) || 256, margin: 1, color: { dark: '#000000', light: '#ffffff' }, errorCorrectionLevel: 'M', ...opts }),
 
   // ── Cloud Sync / Folder Backup ─────────────────────────────────
-  chooseSyncFolder:   ()                  => ipcRenderer.invoke('choose-sync-folder'),
-  syncBackupToFolder: (folderPath, data)  => ipcRenderer.invoke('sync-backup-to-folder', { folderPath, data }),
-  listSyncBackups:    (folderPath)        => ipcRenderer.invoke('list-sync-backups', folderPath),
-  restoreSyncBackup:  (folderPath, fname) => ipcRenderer.invoke('restore-sync-backup', { folderPath, filename: fname }),
+  chooseSyncFolder:   ()                               => ipcRenderer.invoke('choose-sync-folder'),
+  syncBackupToFolder: (folderPath, data, locationSlug) => ipcRenderer.invoke('sync-backup-to-folder', { folderPath, data, locationSlug }),
+  listSyncBackups:    (folderPath, locationSlug)       => ipcRenderer.invoke('list-sync-backups', { folderPath, locationSlug }),
+  restoreSyncBackup:  (folderPath, fname, locationSlug) => ipcRenderer.invoke('restore-sync-backup', { folderPath, filename: fname, locationSlug }),
   openFolder:         (folderPath)        => ipcRenderer.invoke('open-folder', folderPath),
 
   // ── Update error notifications ─────────────────────────────────
