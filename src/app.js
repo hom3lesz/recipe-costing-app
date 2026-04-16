@@ -4677,6 +4677,8 @@ function loadLocationData(locationId) {
   state.foodCostTarget = loc.foodCostTarget || state.foodCostTarget;
   state.currency = loc.currency || state.currency;
   state.vatRate = loc.vatRate != null ? loc.vatRate : state.vatRate;
+  // Refresh audit snapshot — the diff must be taken from here on.
+  if (window.Audit) _loadSnapshot = window.Audit.buildSnapshot(state);
   state.activeRecipeId = loc.activeRecipeId || null;
 }
 
@@ -5103,6 +5105,8 @@ async function deleteLocation(id) {
       );
       state.suppliers = JSON.parse(JSON.stringify(otherLoc.suppliers || []));
       state.activeLocationId = otherLoc.id;
+      // Refresh audit snapshot after switching to another location
+      if (window.Audit) _loadSnapshot = window.Audit.buildSnapshot(state);
     }
   }
   // If deleting a non-active location, current state.recipes is untouched — safe
