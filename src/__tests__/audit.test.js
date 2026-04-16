@@ -77,3 +77,97 @@ describe('buildSnapshot', () => {
     expect(snap.suppliers.size).toBe(0);
   });
 });
+
+describe('computeDiff — top-level records', () => {
+  const baseState = () => ({
+    ingredients: [
+      { id: 'ing1', name: 'Cucumber', packCost: 0.9, packSize: 1, unit: 'each', yieldPct: 100 },
+      { id: 'ing2', name: 'Beef',     packCost: 12,  packSize: 1000, unit: 'g',  yieldPct: 92 },
+    ],
+    recipes: [],
+    suppliers: [],
+  });
+
+  test('no changes → empty entries', () => {
+    const state = baseState();
+    const snap = Audit.buildSnapshot(state);
+    const { entries } = Audit.computeDiff(snap, state, 'TestDevice');
+    expect(entries).toEqual([]);
+  });
+
+  test('single field change → one update entry with before/after', () => {
+    const state = baseState();
+    const snap = Audit.buildSnapshot(state);
+    state.ingredients[0].packCost = 0.95;
+    const { entries } = Audit.computeDiff(snap, state, 'TestDevice');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      op: 'update',
+      entity: 'ingredient',
+      entityId: 'ing1',
+      entityName: 'Cucumber',
+      field: 'packCost',
+      before: 0.9,
+      after: 0.95,
+      device: 'TestDevice',
+    });
+    expect(entries[0].ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(entries[0].id).toMatch(/^log_/);
+  });
+
+  test('multiple field changes on same record → one entry per field', () => {
+    const state = baseState();
+    const snap = Audit.buildSnapshot(state);
+    state.ingredients[0].packCost = 0.95;
+    state.ingredients[0].yieldPct = 90;
+    const { entries } = Audit.computeDiff(snap, state, 'TestDevice');
+    expect(entries).toHaveLength(2);
+    const fields = entries.map(e => e.field).sort();
+    expect(fields).toEqual(['packCost', 'yieldPct']);
+  });
+
+  test('new record → one create entry with full record in after', () => {
+    const state = baseState();
+    const snap = Audit.buildSnapshot(state);
+    state.ingredients.push({ id: 'ing3', name: 'Tomato', packCost: 1.5, packSize: 1, unit: 'each', yieldPct: 100 });
+    const { entries } = Audit.computeDiff(snap, state, 'TestDevice');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      op: 'create', entity: 'ingredient', entityId: 'ing3', entityName: 'Tomato',
+    });
+    expect(entries[0].after.packCost).toBe(1.5);
+    expect(entries[0].field).toBeUndefined();
+  });
+
+  test('deleted record → one delete entry with full record in before', () => {
+    const state = baseState();
+    const snap = Audit.buildSnapshot(state);
+    state.ingredients.splice(1, 1); // remove Beef
+    const { entries } = Audit.computeDiff(snap, state, 'TestDevice');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      op: 'delete', entity: 'ingredient', entityId: 'ing2', entityName: 'Beef',
+    });
+    expect(entries[0].before.packCost).toBe(12);
+  });
+
+  test('computeDiff returns stamped set of changed record ids', () => {
+    const state = baseState();
+    const snap = Audit.buildSnapshot(state);
+    state.ingredients[0].packCost = 0.95;
+    const { stampedIds } = Audit.computeDiff(snap, state, 'TestDevice');
+    expect(stampedIds.ingredients).toEqual(new Set(['ing1']));
+  });
+
+  test('skipIds are not logged or stamped even if changed', () => {
+    const state = baseState();
+    const snap = Audit.buildSnapshot(state);
+    state.ingredients[0].packCost = 0.95;
+    const { entries, stampedIds } = Audit.computeDiff(
+      snap, state, 'TestDevice',
+      { skipIds: { ingredients: new Set(['ing1']) } }
+    );
+    expect(entries).toEqual([]);
+    expect(stampedIds.ingredients.has('ing1')).toBe(false);
+  });
+});

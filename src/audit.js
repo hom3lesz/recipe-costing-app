@@ -106,6 +106,113 @@
     return snap;
   }
 
+  // ─── Diff ────────────────────────────────────────────────────────────────
+  function _shallowEqual(a, b) {
+    if (a === b) return true;
+    if (a === null || b === null) return false;
+    if (typeof a !== 'object' || typeof b !== 'object') return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const ak = Object.keys(a);
+    const bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!_shallowEqual(a[k], b[k])) return false;
+    }
+    return true;
+  }
+
+  function _entityForCollection(collection) {
+    if (collection === 'ingredients') return 'ingredient';
+    if (collection === 'recipes') return 'recipe';
+    if (collection === 'suppliers') return 'supplier';
+    return collection;
+  }
+
+  function _fieldsForCollection(collection) {
+    if (collection === 'ingredients') return INGREDIENT_TRACKED_FIELDS;
+    if (collection === 'recipes') return RECIPE_TRACKED_FIELDS;
+    if (collection === 'suppliers') return SUPPLIER_TRACKED_FIELDS;
+    return [];
+  }
+
+  function _makeEntry(op, entity, rec, extras, device) {
+    return Object.assign({
+      id: newLogId(),
+      ts: new Date().toISOString(),
+      device: device || 'Unknown',
+      op,
+      entity,
+      entityId: rec.id,
+      entityName: rec.name || '(unnamed)',
+    }, extras || {});
+  }
+
+  function computeDiff(snapshot, state, device, opts) {
+    opts = opts || {};
+    const skipIds = opts.skipIds || {};
+    const entries = [];
+    const stampedIds = {
+      ingredients: new Set(),
+      recipes: new Set(),
+      suppliers: new Set(),
+    };
+
+    for (const collection of TRACKED_COLLECTIONS) {
+      const entity = _entityForCollection(collection);
+      const fields = _fieldsForCollection(collection);
+      const skip = skipIds[collection] || new Set();
+
+      const snapMap = snapshot[collection] || new Map();
+      const liveById = new Map();
+      (state[collection] || []).forEach((r) => {
+        if (r && r.id) liveById.set(r.id, r);
+      });
+
+      // creates + updates
+      for (const [id, liveRec] of liveById) {
+        if (skip.has(id)) continue;
+        const snapRec = snapMap.get(id);
+        if (!snapRec) {
+          // CREATE
+          entries.push(_makeEntry('create', entity, liveRec, {
+            after: _pickFields(liveRec, fields),
+          }, device));
+          stampedIds[collection].add(id);
+          continue;
+        }
+        // UPDATE — walk each tracked field
+        let changed = false;
+        for (const f of fields) {
+          const beforeVal = snapRec[f];
+          const afterVal = liveRec[f];
+          if (!_shallowEqual(beforeVal, afterVal)) {
+            entries.push(_makeEntry('update', entity, liveRec, {
+              field: f,
+              before: _deepClone(beforeVal),
+              after: _deepClone(afterVal),
+            }, device));
+            changed = true;
+          }
+        }
+        if (changed) stampedIds[collection].add(id);
+      }
+
+      // deletes
+      for (const [id, snapRec] of snapMap) {
+        if (skip.has(id)) continue;
+        if (!liveById.has(id)) {
+          // snapRec only has tracked fields (no id), so inject it for _makeEntry
+          const recWithId = Object.assign({ id }, snapRec);
+          entries.push(_makeEntry('delete', entity, recWithId, {
+            before: _deepClone(snapRec),
+          }, device));
+        }
+      }
+    }
+
+    return { entries, stampedIds };
+  }
+
   // ─── Public API (filled in by later tasks) ────────────────────────────────
   return {
     SCHEMA_VERSION,
@@ -117,5 +224,6 @@
     IGNORED_STATE_KEYS,
     newLogId,
     buildSnapshot,
+    computeDiff,
   };
 }));
