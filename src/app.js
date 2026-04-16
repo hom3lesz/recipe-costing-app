@@ -3533,6 +3533,45 @@ async function save() {
       throw new Error("Save system not initialized. Please restart the app.");
     }
     logAllRecipeCosts();
+    // ── Audit trail: compute diff, stamp changed records, append to log ──
+    try {
+      if (window.Audit && _loadSnapshot) {
+        const deviceName = (state.sync && state.sync.deviceName) || 'This PC';
+        const skipIds = _currentBulkHandle
+          ? {
+              ingredients: _currentBulkHandle.spec.collection === 'ingredients' ? _currentBulkHandle.skipIds : new Set(),
+              recipes:     _currentBulkHandle.spec.collection === 'recipes'     ? _currentBulkHandle.skipIds : new Set(),
+              suppliers:   _currentBulkHandle.spec.collection === 'suppliers'   ? _currentBulkHandle.skipIds : new Set(),
+            }
+          : {};
+        const { entries, stampedIds } = window.Audit.computeDiff(_loadSnapshot, state, deviceName, { skipIds });
+
+        // Stamp _modifiedAt on every changed top-level record
+        const nowIso = new Date().toISOString();
+        ['ingredients', 'recipes', 'suppliers'].forEach((collection) => {
+          (state[collection] || []).forEach((rec) => {
+            if (rec && rec.id && stampedIds[collection].has(rec.id)) {
+              rec._modifiedAt = nowIso;
+              rec._modifiedBy = deviceName;
+            }
+          });
+        });
+
+        window.Audit.appendLogEntries(state, entries);
+
+        // Rotate old entries out to archive files
+        const { groupedByMonth } = window.Audit.rotateLog(state, { maxEntries: 2000, maxAgeDays: 90 });
+        for (const ym of Object.keys(groupedByMonth)) {
+          if (window.electronAPI && window.electronAPI.saveAuditArchive) {
+            window.electronAPI.saveAuditArchive(ym, groupedByMonth[ym]).catch(function (e) {
+              console.error("[audit-archive]", e);
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[audit-diff]", e);
+    }
     if (!state.locations) state.locations = [];
     if (state.activeLocationId) saveActiveLocationData();
     await browserIPC.saveData({
@@ -3550,7 +3589,14 @@ async function save() {
       vatRate: state.vatRate,
       locations: state.locations,
       activeLocationId: state.activeLocationId,
+      schemaVersion: state.schemaVersion,
+      auditLog: state.auditLog,
+      _lastSyncAt: state._lastSyncAt,
     });
+    // Refresh the load snapshot — future saves diff against the just-written state.
+    try {
+      if (window.Audit) _loadSnapshot = window.Audit.buildSnapshot(state);
+    } catch (e) { console.error("[audit-snapshot-refresh]", e); }
     _setSaveIndicator("saved");
     // Auto-sync to cloud folder if enabled
     _autoSyncToCloud();
