@@ -25,6 +25,9 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Superpowers brainstorm
+.superpowers/
+
 # Local env
 .env
 .env.local
