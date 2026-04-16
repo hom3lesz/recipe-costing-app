@@ -171,3 +171,101 @@ describe('computeDiff — top-level records', () => {
     expect(stampedIds.ingredients.has('ing1')).toBe(false);
   });
 });
+
+describe('computeDiff — nested recipe rows', () => {
+  const recipeState = () => ({
+    ingredients: [],
+    recipes: [
+      {
+        id: 'rec1', name: 'Bolognese', portions: 4,
+        ingredients: [
+          { ingId: 'ing1', qty: 500, recipeUnit: 'g', wastePct: 0 },
+          { ingId: 'ing2', qty: 200, recipeUnit: 'g', wastePct: 5 },
+        ],
+        subRecipes: [
+          { recipeId: 'rec-sauce', qty: 1 },
+        ],
+      },
+    ],
+    suppliers: [],
+  });
+
+  test('ingredient row added to recipe → one recipeIngredient create entry', () => {
+    const state = recipeState();
+    const snap = Audit.buildSnapshot(state);
+    state.recipes[0].ingredients.push({ ingId: 'ing3', qty: 1, recipeUnit: 'each', wastePct: 0 });
+    const { entries } = Audit.computeDiff(snap, state, 'Dev');
+    const relevant = entries.filter(e => e.entity === 'recipeIngredient');
+    expect(relevant).toHaveLength(1);
+    expect(relevant[0]).toMatchObject({
+      op: 'create',
+      parentId: 'rec1',
+      entityId: 'ing3',
+    });
+  });
+
+  test('ingredient row removed from recipe → one recipeIngredient delete entry', () => {
+    const state = recipeState();
+    const snap = Audit.buildSnapshot(state);
+    state.recipes[0].ingredients.splice(0, 1); // remove ing1
+    const { entries } = Audit.computeDiff(snap, state, 'Dev');
+    const relevant = entries.filter(e => e.entity === 'recipeIngredient');
+    expect(relevant).toHaveLength(1);
+    expect(relevant[0]).toMatchObject({
+      op: 'delete',
+      parentId: 'rec1',
+      entityId: 'ing1',
+    });
+  });
+
+  test('ingredient row qty change → one recipeIngredient update entry', () => {
+    const state = recipeState();
+    const snap = Audit.buildSnapshot(state);
+    state.recipes[0].ingredients[0].qty = 700;
+    const { entries } = Audit.computeDiff(snap, state, 'Dev');
+    const relevant = entries.filter(e => e.entity === 'recipeIngredient');
+    expect(relevant).toHaveLength(1);
+    expect(relevant[0]).toMatchObject({
+      op: 'update',
+      parentId: 'rec1',
+      entityId: 'ing1',
+      field: 'qty',
+      before: 500,
+      after: 700,
+    });
+  });
+
+  test('ingredient row reorder (no other changes) → one ingredientOrder entry', () => {
+    const state = recipeState();
+    const snap = Audit.buildSnapshot(state);
+    state.recipes[0].ingredients = [state.recipes[0].ingredients[1], state.recipes[0].ingredients[0]];
+    const { entries } = Audit.computeDiff(snap, state, 'Dev');
+    const relevant = entries.filter(e => e.field === 'ingredientOrder');
+    expect(relevant).toHaveLength(1);
+    expect(relevant[0]).toMatchObject({
+      op: 'update', entity: 'recipe', entityId: 'rec1', field: 'ingredientOrder',
+    });
+    expect(relevant[0].before).toEqual(['ing1', 'ing2']);
+    expect(relevant[0].after).toEqual(['ing2', 'ing1']);
+  });
+
+  test('sub-recipe added → one subRecipe create entry', () => {
+    const state = recipeState();
+    const snap = Audit.buildSnapshot(state);
+    state.recipes[0].subRecipes.push({ recipeId: 'rec-extra', qty: 2 });
+    const { entries } = Audit.computeDiff(snap, state, 'Dev');
+    const relevant = entries.filter(e => e.entity === 'subRecipe');
+    expect(relevant).toHaveLength(1);
+    expect(relevant[0]).toMatchObject({
+      op: 'create', parentId: 'rec1', entityId: 'rec-extra',
+    });
+  });
+
+  test('changing ingredient row qty also stamps the parent recipe', () => {
+    const state = recipeState();
+    const snap = Audit.buildSnapshot(state);
+    state.recipes[0].ingredients[0].qty = 700;
+    const { stampedIds } = Audit.computeDiff(snap, state, 'Dev');
+    expect(stampedIds.recipes.has('rec1')).toBe(true);
+  });
+});

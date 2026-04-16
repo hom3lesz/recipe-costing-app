@@ -147,6 +147,101 @@
     }, extras || {});
   }
 
+  function _diffNestedRows(parentRec, snapRec, rowsKey, idKey, nestedEntity, device, entries) {
+    const before = snapRec[rowsKey] || [];
+    const after  = parentRec[rowsKey] || [];
+    const beforeById = new Map();
+    const afterById  = new Map();
+    before.forEach(r => { if (r && r[idKey]) beforeById.set(r[idKey], r); });
+    after.forEach(r  => { if (r && r[idKey]) afterById.set(r[idKey], r);  });
+
+    let anyChange = false;
+
+    // creates
+    for (const [id, row] of afterById) {
+      if (!beforeById.has(id)) {
+        entries.push({
+          id: newLogId(),
+          ts: new Date().toISOString(),
+          device: device || 'Unknown',
+          op: 'create',
+          entity: nestedEntity,
+          entityId: id,
+          entityName: parentRec.name || '(unnamed)',
+          parentId: parentRec.id,
+          after: _deepClone(row),
+        });
+        anyChange = true;
+      }
+    }
+
+    // deletes
+    for (const [id, row] of beforeById) {
+      if (!afterById.has(id)) {
+        entries.push({
+          id: newLogId(),
+          ts: new Date().toISOString(),
+          device: device || 'Unknown',
+          op: 'delete',
+          entity: nestedEntity,
+          entityId: id,
+          entityName: parentRec.name || '(unnamed)',
+          parentId: parentRec.id,
+          before: _deepClone(row),
+        });
+        anyChange = true;
+      }
+    }
+
+    // updates — walk each field on matching rows
+    for (const [id, afterRow] of afterById) {
+      const beforeRow = beforeById.get(id);
+      if (!beforeRow) continue;
+      for (const f of Object.keys(afterRow)) {
+        if (f === idKey) continue;
+        if (!_shallowEqual(beforeRow[f], afterRow[f])) {
+          entries.push({
+            id: newLogId(),
+            ts: new Date().toISOString(),
+            device: device || 'Unknown',
+            op: 'update',
+            entity: nestedEntity,
+            entityId: id,
+            entityName: parentRec.name || '(unnamed)',
+            parentId: parentRec.id,
+            field: f,
+            before: _deepClone(beforeRow[f]),
+            after: _deepClone(afterRow[f]),
+          });
+          anyChange = true;
+        }
+      }
+    }
+
+    // reorder — same set of ids but different order
+    const beforeOrder = before.map(r => r && r[idKey]).filter(Boolean);
+    const afterOrder  = after.map(r  => r && r[idKey]).filter(Boolean);
+    if (beforeOrder.length === afterOrder.length &&
+        beforeOrder.every(id => afterById.has(id)) &&
+        !beforeOrder.every((id, i) => id === afterOrder[i])) {
+      entries.push({
+        id: newLogId(),
+        ts: new Date().toISOString(),
+        device: device || 'Unknown',
+        op: 'update',
+        entity: 'recipe',
+        entityId: parentRec.id,
+        entityName: parentRec.name || '(unnamed)',
+        field: rowsKey === 'ingredients' ? 'ingredientOrder' : 'subRecipeOrder',
+        before: beforeOrder,
+        after: afterOrder,
+      });
+      anyChange = true;
+    }
+
+    return anyChange;
+  }
+
   function computeDiff(snapshot, state, device, opts) {
     opts = opts || {};
     const skipIds = opts.skipIds || {};
@@ -191,6 +286,14 @@
               before: _deepClone(beforeVal),
               after: _deepClone(afterVal),
             }, device));
+            changed = true;
+          }
+        }
+        if (collection === 'recipes') {
+          if (_diffNestedRows(liveRec, snapRec, 'ingredients', 'ingId', 'recipeIngredient', device, entries)) {
+            changed = true;
+          }
+          if (_diffNestedRows(liveRec, snapRec, 'subRecipes', 'recipeId', 'subRecipe', device, entries)) {
             changed = true;
           }
         }
