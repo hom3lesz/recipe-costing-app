@@ -328,3 +328,56 @@ describe('rotateLog', () => {
     expect(groupedByMonth['2025-02']).toHaveLength(1);
   });
 });
+
+describe('bulk wrapper', () => {
+  test('startBulk returns a handle; endBulk emits a single bulk-update entry', () => {
+    const state = { auditLog: [] };
+    const handle = Audit.startBulk(state, {
+      collection: 'ingredients',
+      op: 'bulk-update',
+      field: 'packCost',
+      notes: '+3% across all Brakes',
+    });
+    handle.changes.push({ id: 'ing1', name: 'A', before: 1.0, after: 1.03 });
+    handle.changes.push({ id: 'ing2', name: 'B', before: 2.0, after: 2.06 });
+    Audit.endBulk(state, handle, 'TestDevice');
+    expect(state.auditLog).toHaveLength(1);
+    expect(state.auditLog[0]).toMatchObject({
+      op: 'bulk-update',
+      entity: 'ingredients',
+      field: 'packCost',
+      notes: '+3% across all Brakes',
+      count: 2,
+      device: 'TestDevice',
+    });
+    expect(state.auditLog[0].changes).toHaveLength(2);
+  });
+
+  test('endBulk is a no-op if handle has zero changes', () => {
+    const state = { auditLog: [] };
+    const handle = Audit.startBulk(state, { collection: 'ingredients', op: 'bulk-update', field: 'packCost' });
+    Audit.endBulk(state, handle, 'Dev');
+    expect(state.auditLog).toHaveLength(0);
+  });
+
+  test('changes array is truncated at 500 with truncated flag set', () => {
+    const state = { auditLog: [] };
+    const handle = Audit.startBulk(state, { collection: 'ingredients', op: 'bulk-update', field: 'packCost' });
+    for (let i = 0; i < 600; i++) {
+      handle.changes.push({ id: 'i' + i, name: 'x', before: 0, after: 1 });
+    }
+    Audit.endBulk(state, handle, 'Dev');
+    expect(state.auditLog[0].changes).toHaveLength(500);
+    expect(state.auditLog[0].truncated).toBe(true);
+    expect(state.auditLog[0].count).toBe(600);
+  });
+
+  test('handle.skipIds is a Set populated as caller records changes', () => {
+    const state = { auditLog: [] };
+    const handle = Audit.startBulk(state, { collection: 'ingredients', op: 'bulk-update', field: 'packCost' });
+    handle.skipIds.add('ing1');
+    handle.skipIds.add('ing2');
+    expect(handle.skipIds.has('ing1')).toBe(true);
+    expect(handle.skipIds.size).toBe(2);
+  });
+});

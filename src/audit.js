@@ -385,6 +385,41 @@
     return { archived: toArchive, groupedByMonth };
   }
 
+  // ─── Bulk op wrapper ─────────────────────────────────────────────────────
+  function startBulk(state, spec) {
+    return {
+      spec: spec || {},
+      changes: [],
+      skipIds: new Set(),
+    };
+  }
+
+  function endBulk(state, handle, deviceName) {
+    if (!handle || !handle.changes || handle.changes.length === 0) return;
+    const spec = handle.spec || {};
+    const count = handle.changes.length;
+    const MAX = 500;
+    const truncated = count > MAX;
+    const changes = truncated ? handle.changes.slice(0, MAX) : handle.changes;
+
+    const entry = {
+      id: newLogId(),
+      ts: new Date().toISOString(),
+      device: deviceName || 'Unknown',
+      op: spec.op || 'bulk-update',
+      entity: spec.collection || 'ingredients',
+      entityId: null,
+      entityName: spec.notes || '(bulk)',
+      field: spec.field || null,
+      count,
+      changes,
+    };
+    if (truncated) entry.truncated = true;
+    if (spec.notes) entry.notes = spec.notes;
+
+    appendLogEntries(state, [entry]);
+  }
+
   // ─── Public API (filled in by later tasks) ────────────────────────────────
   return {
     SCHEMA_VERSION,
@@ -400,5 +435,7 @@
     migrateToV2,
     appendLogEntries,
     rotateLog,
+    startBulk,
+    endBulk,
   };
 }));
