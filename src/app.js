@@ -14049,6 +14049,13 @@ function parseBulkPrices() {
 
 function applyBulkPrices() {
   const modal = document.getElementById("bulk-price-modal");
+  const deviceName = (state.sync && state.sync.deviceName) || 'This PC';
+  _currentBulkHandle = window.Audit ? window.Audit.startBulk(state, {
+    collection: 'ingredients',
+    op: 'bulk-update',
+    field: 'packCost',
+    notes: 'Bulk price update (supplier invoice)',
+  }) : null;
   const pending = JSON.parse(modal.dataset.pending || "[]");
   let updated = 0;
   const changes = [];
@@ -14062,10 +14069,20 @@ function applyBulkPrices() {
       packCost: ing.packCost,
     });
     ing.packCost = price;
+    if (_currentBulkHandle) {
+      _currentBulkHandle.skipIds.add(ing.id);
+      _currentBulkHandle.changes.push({ id: ing.id, name: ing.name, before: oldCost, after: price });
+      ing._modifiedAt = new Date().toISOString();
+      ing._modifiedBy = deviceName;
+    }
     changes.push({ ing, oldCost, newCost: price });
     updated++;
   });
   modal.classList.add("hidden");
+  if (window.Audit && _currentBulkHandle) {
+    window.Audit.endBulk(state, _currentBulkHandle, deviceName);
+    _currentBulkHandle = null;
+  }
   save();
   renderIngredientLibrary && renderIngredientLibrary();
   if (state.activeRecipeId) renderRecipeEditor();
@@ -19658,6 +19675,13 @@ function renderBulkPriceList() {
 }
 function applyBulkPriceUpdate() {
   let updated = 0;
+  const deviceName = (state.sync && state.sync.deviceName) || 'This PC';
+  _currentBulkHandle = window.Audit ? window.Audit.startBulk(state, {
+    collection: 'ingredients',
+    op: 'bulk-update',
+    field: 'packCost',
+    notes: 'Bulk price update (paste)',
+  }) : null;
   document.querySelectorAll(".bulk-price-input").forEach((input) => {
     const id = input.dataset.id;
     const newVal = parseFloat(input.value);
@@ -19672,9 +19696,20 @@ function applyBulkPriceUpdate() {
       change: newVal - ing.packCost,
     });
     ing.packCost = newVal;
+    if (_currentBulkHandle) {
+      const oldCost = ing.priceHistory[ing.priceHistory.length - 1].oldCost;
+      _currentBulkHandle.skipIds.add(ing.id);
+      _currentBulkHandle.changes.push({ id: ing.id, name: ing.name, before: oldCost, after: newVal });
+      ing._modifiedAt = new Date().toISOString();
+      ing._modifiedBy = deviceName;
+    }
     updated++;
   });
   if (updated) {
+    if (window.Audit && _currentBulkHandle) {
+      window.Audit.endBulk(state, _currentBulkHandle, deviceName);
+      _currentBulkHandle = null;
+    }
     save();
     showToast(
       `Updated ${updated} ingredient price${updated !== 1 ? "s" : ""}`,
@@ -19687,6 +19722,7 @@ function applyBulkPriceUpdate() {
   } else {
     showToast("No prices changed", "error", 1500);
   }
+  _currentBulkHandle = null; // ensure cleanup even if no updates
 }
 
 // ─── Price Trend Chart ─────────────────────────────────────────
