@@ -316,6 +316,31 @@
     return { entries, stampedIds };
   }
 
+  // ─── Migration ───────────────────────────────────────────────────────────
+  function migrateToV2(state, deviceName) {
+    if (state.schemaVersion === SCHEMA_VERSION) {
+      return { migrated: false };
+    }
+    const stampTs = state.exportDate || new Date().toISOString();
+    const stampBy = deviceName || 'Unknown';
+
+    for (const collection of TRACKED_COLLECTIONS) {
+      const list = state[collection];
+      if (!Array.isArray(list)) continue;
+      list.forEach((rec) => {
+        if (!rec || !rec.id) return;
+        if (!rec._modifiedAt) rec._modifiedAt = stampTs;
+        if (!rec._modifiedBy) rec._modifiedBy = stampBy;
+      });
+    }
+
+    if (!Array.isArray(state.auditLog)) state.auditLog = [];
+    state._lastSyncAt = null;
+    state.schemaVersion = SCHEMA_VERSION;
+
+    return { migrated: true };
+  }
+
   // ─── Public API (filled in by later tasks) ────────────────────────────────
   return {
     SCHEMA_VERSION,
@@ -328,5 +353,6 @@
     newLogId,
     buildSnapshot,
     computeDiff,
+    migrateToV2,
   };
 }));
