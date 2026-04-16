@@ -57,6 +57,55 @@
       _idCounter.toString(36);
   }
 
+  // ─── Snapshot ─────────────────────────────────────────────────────────────
+  function _pickFields(record, fields) {
+    const out = {};
+    for (const f of fields) {
+      if (record[f] !== undefined) {
+        out[f] = _deepClone(record[f]);
+      }
+    }
+    return out;
+  }
+
+  function _deepClone(v) {
+    if (v === null || typeof v !== 'object') return v;
+    if (Array.isArray(v)) return v.map(_deepClone);
+    const o = {};
+    for (const k of Object.keys(v)) o[k] = _deepClone(v[k]);
+    return o;
+  }
+
+  function buildSnapshot(state) {
+    const snap = {
+      ingredients: new Map(),
+      recipes: new Map(),
+      suppliers: new Map(),
+    };
+
+    (state.ingredients || []).forEach((ing) => {
+      if (ing && ing.id) {
+        snap.ingredients.set(ing.id, _pickFields(ing, INGREDIENT_TRACKED_FIELDS));
+      }
+    });
+
+    (state.recipes || []).forEach((rec) => {
+      if (!rec || !rec.id) return;
+      const picked = _pickFields(rec, RECIPE_TRACKED_FIELDS);
+      picked.ingredients = _deepClone(rec.ingredients || []);
+      picked.subRecipes  = _deepClone(rec.subRecipes || []);
+      snap.recipes.set(rec.id, picked);
+    });
+
+    (state.suppliers || []).forEach((sup) => {
+      if (sup && sup.id) {
+        snap.suppliers.set(sup.id, _pickFields(sup, SUPPLIER_TRACKED_FIELDS));
+      }
+    });
+
+    return snap;
+  }
+
   // ─── Public API (filled in by later tasks) ────────────────────────────────
   return {
     SCHEMA_VERSION,
@@ -67,5 +116,6 @@
     SUPPLIER_TRACKED_FIELDS,
     IGNORED_STATE_KEYS,
     newLogId,
+    buildSnapshot,
   };
 }));
