@@ -341,6 +341,50 @@
     return { migrated: true };
   }
 
+  // ─── Log append + rotation ───────────────────────────────────────────────
+  function appendLogEntries(state, entries) {
+    if (!Array.isArray(state.auditLog)) state.auditLog = [];
+    if (!entries || !entries.length) return;
+    for (const e of entries) state.auditLog.push(e);
+  }
+
+  function rotateLog(state, opts) {
+    opts = opts || {};
+    const maxEntries = opts.maxEntries || 2000;
+    const maxAgeDays = opts.maxAgeDays || 90;
+    const log = state.auditLog || [];
+    if (!log.length) return { archived: [], groupedByMonth: {} };
+
+    const cutoff = Date.now() - maxAgeDays * 86400000;
+    const toKeep = [];
+    const toArchive = [];
+
+    for (const e of log) {
+      const ts = e.ts ? Date.parse(e.ts) : NaN;
+      if (isFinite(ts) && ts < cutoff) toArchive.push(e);
+      else toKeep.push(e);
+    }
+
+    // Soft cap — if still too many, spill the oldest
+    if (toKeep.length > maxEntries) {
+      toKeep.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+      const overflow = toKeep.length - maxEntries;
+      const spilled = toKeep.splice(0, overflow);
+      for (const s of spilled) toArchive.push(s);
+    }
+
+    // Group archive entries by YYYY-MM
+    const groupedByMonth = {};
+    for (const e of toArchive) {
+      const ym = (e.ts || '').slice(0, 7) || 'unknown';
+      if (!groupedByMonth[ym]) groupedByMonth[ym] = [];
+      groupedByMonth[ym].push(e);
+    }
+
+    state.auditLog = toKeep;
+    return { archived: toArchive, groupedByMonth };
+  }
+
   // ─── Public API (filled in by later tasks) ────────────────────────────────
   return {
     SCHEMA_VERSION,
@@ -354,5 +398,7 @@
     buildSnapshot,
     computeDiff,
     migrateToV2,
+    appendLogEntries,
+    rotateLog,
   };
 }));

@@ -269,3 +269,62 @@ describe('computeDiff — nested recipe rows', () => {
     expect(stampedIds.recipes.has('rec1')).toBe(true);
   });
 });
+
+describe('appendLogEntries', () => {
+  test('appends entries to state.auditLog', () => {
+    const state = { auditLog: [] };
+    Audit.appendLogEntries(state, [{ id: 'a' }, { id: 'b' }]);
+    expect(state.auditLog).toHaveLength(2);
+  });
+
+  test('creates auditLog array if missing', () => {
+    const state = {};
+    Audit.appendLogEntries(state, [{ id: 'a' }]);
+    expect(state.auditLog).toHaveLength(1);
+  });
+
+  test('no-op on empty entries array', () => {
+    const state = { auditLog: [{ id: 'existing' }] };
+    Audit.appendLogEntries(state, []);
+    expect(state.auditLog).toHaveLength(1);
+  });
+});
+
+describe('rotateLog', () => {
+  function makeEntry(daysAgo) {
+    const d = new Date(Date.now() - daysAgo * 86400000);
+    return { id: 'log_' + Math.random(), ts: d.toISOString() };
+  }
+
+  test('no rotation if log under soft cap and all entries under retention', () => {
+    const state = { auditLog: [makeEntry(1), makeEntry(2)] };
+    const { archived } = Audit.rotateLog(state, { maxEntries: 2000, maxAgeDays: 90 });
+    expect(state.auditLog).toHaveLength(2);
+    expect(archived).toEqual([]);
+  });
+
+  test('entries older than maxAgeDays are moved into archived[]', () => {
+    const state = { auditLog: [makeEntry(1), makeEntry(100), makeEntry(200)] };
+    const { archived } = Audit.rotateLog(state, { maxEntries: 2000, maxAgeDays: 90 });
+    expect(state.auditLog).toHaveLength(1);
+    expect(archived).toHaveLength(2);
+  });
+
+  test('entries beyond maxEntries soft cap are moved to archived[] oldest-first', () => {
+    const entries = [];
+    for (let i = 0; i < 5; i++) entries.push(makeEntry(1));
+    const state = { auditLog: entries };
+    const { archived } = Audit.rotateLog(state, { maxEntries: 3, maxAgeDays: 90 });
+    expect(state.auditLog).toHaveLength(3);
+    expect(archived).toHaveLength(2);
+  });
+
+  test('archived entries are grouped by YYYY-MM for archive file routing', () => {
+    const jan = { id: 'a', ts: '2025-01-15T00:00:00.000Z' };
+    const feb = { id: 'b', ts: '2025-02-10T00:00:00.000Z' };
+    const state = { auditLog: [jan, feb] };
+    const { groupedByMonth } = Audit.rotateLog(state, { maxEntries: 2000, maxAgeDays: 1 });
+    expect(groupedByMonth['2025-01']).toHaveLength(1);
+    expect(groupedByMonth['2025-02']).toHaveLength(1);
+  });
+});
