@@ -1983,6 +1983,18 @@ async function init() {
       if (!i.priceHistory) i.priceHistory = [];
       if (!i.altSuppliers) i.altSuppliers = [];
     });
+    // ── Audit trail schema migration (v2) ─────────────────────────────────
+    // Stamp _modifiedAt/_modifiedBy on every record, initialise state.auditLog,
+    // and set state._lastSyncAt = null. Idempotent — no-op after first run.
+    try {
+      const deviceName = (state.sync && state.sync.deviceName) || 'This PC';
+      const result = window.Audit.migrateToV2(state, deviceName);
+      if (result.migrated) {
+        showToast("✓ Activity tracking enabled. Changes from now on will be logged.", "success", 3500);
+      }
+    } catch (e) {
+      console.error("[audit-migration]", e);
+    }
     // Clean up bad invoice history records (Invalid Date, undefined invoice numbers)
     (state.suppliers || []).forEach((sup) => {
       (sup.invoiceHistory || []).forEach((inv) => {
