@@ -1961,6 +1961,8 @@ let editingIngredientId = null;
 let confirmCallback = null;
 let recipeSnapshot = null;
 let dragSrcIdx = null;
+let _loadSnapshot = null; // populated by Audit.buildSnapshot after load + after location switches
+let _currentBulkHandle = null; // set during bulk operations to suppress per-record diffs
 
 // ─── Init ─────────────────────────────────────────────────────
 async function init() {
@@ -2168,6 +2170,14 @@ async function init() {
 
   // Enhance all search inputs (Esc clear, × button, persistence)
   _enhanceAllSearchInputs();
+
+  // Take the post-migration snapshot. From here on, every mutation will be
+  // compared against this snapshot when save() next runs.
+  try {
+    _loadSnapshot = window.Audit.buildSnapshot(state);
+  } catch (e) {
+    console.error("[audit-snapshot]", e);
+  }
 }
 
 function _enhanceAllSearchInputs() {
