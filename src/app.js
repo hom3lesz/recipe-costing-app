@@ -1961,6 +1961,8 @@ let editingIngredientId = null;
 let confirmCallback = null;
 let recipeSnapshot = null;
 let dragSrcIdx = null;
+let _loadSnapshot = null; // populated by Audit.buildSnapshot after load + after location switches
+let _currentBulkHandle = null; // set during bulk operations to suppress per-record diffs
 
 // ─── Init ─────────────────────────────────────────────────────
 async function init() {
@@ -1983,6 +1985,18 @@ async function init() {
       if (!i.priceHistory) i.priceHistory = [];
       if (!i.altSuppliers) i.altSuppliers = [];
     });
+    // ── Audit trail schema migration (v2) ─────────────────────────────────
+    // Stamp _modifiedAt/_modifiedBy on every record, initialise state.auditLog,
+    // and set state._lastSyncAt = null. Idempotent — no-op after first run.
+    try {
+      const deviceName = (state.sync && state.sync.deviceName) || 'This PC';
+      const result = window.Audit.migrateToV2(state, deviceName);
+      if (result.migrated) {
+        showToast("✓ Activity tracking enabled. Changes from now on will be logged.", "success", 3500);
+      }
+    } catch (e) {
+      console.error("[audit-migration]", e);
+    }
     // Clean up bad invoice history records (Invalid Date, undefined invoice numbers)
     (state.suppliers || []).forEach((sup) => {
       (sup.invoiceHistory || []).forEach((inv) => {
@@ -2156,6 +2170,14 @@ async function init() {
 
   // Enhance all search inputs (Esc clear, × button, persistence)
   _enhanceAllSearchInputs();
+
+  // Take the post-migration snapshot. From here on, every mutation will be
+  // compared against this snapshot when save() next runs.
+  try {
+    _loadSnapshot = window.Audit.buildSnapshot(state);
+  } catch (e) {
+    console.error("[audit-snapshot]", e);
+  }
 }
 
 function _enhanceAllSearchInputs() {
@@ -3511,6 +3533,45 @@ async function save() {
       throw new Error("Save system not initialized. Please restart the app.");
     }
     logAllRecipeCosts();
+    // ── Audit trail: compute diff, stamp changed records, append to log ──
+    try {
+      if (window.Audit && _loadSnapshot) {
+        const deviceName = (state.sync && state.sync.deviceName) || 'This PC';
+        const skipIds = _currentBulkHandle
+          ? {
+              ingredients: _currentBulkHandle.spec.collection === 'ingredients' ? _currentBulkHandle.skipIds : new Set(),
+              recipes:     _currentBulkHandle.spec.collection === 'recipes'     ? _currentBulkHandle.skipIds : new Set(),
+              suppliers:   _currentBulkHandle.spec.collection === 'suppliers'   ? _currentBulkHandle.skipIds : new Set(),
+            }
+          : {};
+        const { entries, stampedIds } = window.Audit.computeDiff(_loadSnapshot, state, deviceName, { skipIds });
+
+        // Stamp _modifiedAt on every changed top-level record
+        const nowIso = new Date().toISOString();
+        ['ingredients', 'recipes', 'suppliers'].forEach((collection) => {
+          (state[collection] || []).forEach((rec) => {
+            if (rec && rec.id && stampedIds[collection].has(rec.id)) {
+              rec._modifiedAt = nowIso;
+              rec._modifiedBy = deviceName;
+            }
+          });
+        });
+
+        window.Audit.appendLogEntries(state, entries);
+
+        // Rotate old entries out to archive files
+        const { groupedByMonth } = window.Audit.rotateLog(state, { maxEntries: 2000, maxAgeDays: 90 });
+        for (const ym of Object.keys(groupedByMonth)) {
+          if (window.electronAPI && window.electronAPI.saveAuditArchive) {
+            window.electronAPI.saveAuditArchive(ym, groupedByMonth[ym]).catch(function (e) {
+              console.error("[audit-archive]", e);
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[audit-diff]", e);
+    }
     if (!state.locations) state.locations = [];
     if (state.activeLocationId) saveActiveLocationData();
     await browserIPC.saveData({
@@ -3528,7 +3589,14 @@ async function save() {
       vatRate: state.vatRate,
       locations: state.locations,
       activeLocationId: state.activeLocationId,
+      schemaVersion: state.schemaVersion,
+      auditLog: state.auditLog,
+      _lastSyncAt: state._lastSyncAt,
     });
+    // Refresh the load snapshot — future saves diff against the just-written state.
+    try {
+      if (window.Audit) _loadSnapshot = window.Audit.buildSnapshot(state);
+    } catch (e) { console.error("[audit-snapshot-refresh]", e); }
     _setSaveIndicator("saved");
     // Auto-sync to cloud folder if enabled
     _autoSyncToCloud();
@@ -4655,6 +4723,8 @@ function loadLocationData(locationId) {
   state.foodCostTarget = loc.foodCostTarget || state.foodCostTarget;
   state.currency = loc.currency || state.currency;
   state.vatRate = loc.vatRate != null ? loc.vatRate : state.vatRate;
+  // Refresh audit snapshot — the diff must be taken from here on.
+  if (window.Audit) _loadSnapshot = window.Audit.buildSnapshot(state);
   state.activeRecipeId = loc.activeRecipeId || null;
 }
 
@@ -5081,6 +5151,8 @@ async function deleteLocation(id) {
       );
       state.suppliers = JSON.parse(JSON.stringify(otherLoc.suppliers || []));
       state.activeLocationId = otherLoc.id;
+      // Refresh audit snapshot after switching to another location
+      if (window.Audit) _loadSnapshot = window.Audit.buildSnapshot(state);
     }
   }
   // If deleting a non-active location, current state.recipes is untouched — safe
@@ -13977,6 +14049,13 @@ function parseBulkPrices() {
 
 function applyBulkPrices() {
   const modal = document.getElementById("bulk-price-modal");
+  const deviceName = (state.sync && state.sync.deviceName) || 'This PC';
+  _currentBulkHandle = window.Audit ? window.Audit.startBulk(state, {
+    collection: 'ingredients',
+    op: 'bulk-update',
+    field: 'packCost',
+    notes: 'Bulk price update (supplier invoice)',
+  }) : null;
   const pending = JSON.parse(modal.dataset.pending || "[]");
   let updated = 0;
   const changes = [];
@@ -13990,10 +14069,20 @@ function applyBulkPrices() {
       packCost: ing.packCost,
     });
     ing.packCost = price;
+    if (_currentBulkHandle) {
+      _currentBulkHandle.skipIds.add(ing.id);
+      _currentBulkHandle.changes.push({ id: ing.id, name: ing.name, before: oldCost, after: price });
+      ing._modifiedAt = new Date().toISOString();
+      ing._modifiedBy = deviceName;
+    }
     changes.push({ ing, oldCost, newCost: price });
     updated++;
   });
   modal.classList.add("hidden");
+  if (window.Audit && _currentBulkHandle) {
+    window.Audit.endBulk(state, _currentBulkHandle, deviceName);
+    _currentBulkHandle = null;
+  }
   save();
   renderIngredientLibrary && renderIngredientLibrary();
   if (state.activeRecipeId) renderRecipeEditor();
@@ -19586,6 +19675,13 @@ function renderBulkPriceList() {
 }
 function applyBulkPriceUpdate() {
   let updated = 0;
+  const deviceName = (state.sync && state.sync.deviceName) || 'This PC';
+  _currentBulkHandle = window.Audit ? window.Audit.startBulk(state, {
+    collection: 'ingredients',
+    op: 'bulk-update',
+    field: 'packCost',
+    notes: 'Bulk price update (paste)',
+  }) : null;
   document.querySelectorAll(".bulk-price-input").forEach((input) => {
     const id = input.dataset.id;
     const newVal = parseFloat(input.value);
@@ -19600,9 +19696,20 @@ function applyBulkPriceUpdate() {
       change: newVal - ing.packCost,
     });
     ing.packCost = newVal;
+    if (_currentBulkHandle) {
+      const oldCost = ing.priceHistory[ing.priceHistory.length - 1].oldCost;
+      _currentBulkHandle.skipIds.add(ing.id);
+      _currentBulkHandle.changes.push({ id: ing.id, name: ing.name, before: oldCost, after: newVal });
+      ing._modifiedAt = new Date().toISOString();
+      ing._modifiedBy = deviceName;
+    }
     updated++;
   });
   if (updated) {
+    if (window.Audit && _currentBulkHandle) {
+      window.Audit.endBulk(state, _currentBulkHandle, deviceName);
+      _currentBulkHandle = null;
+    }
     save();
     showToast(
       `Updated ${updated} ingredient price${updated !== 1 ? "s" : ""}`,
@@ -19615,6 +19722,7 @@ function applyBulkPriceUpdate() {
   } else {
     showToast("No prices changed", "error", 1500);
   }
+  _currentBulkHandle = null; // ensure cleanup even if no updates
 }
 
 // ─── Price Trend Chart ─────────────────────────────────────────

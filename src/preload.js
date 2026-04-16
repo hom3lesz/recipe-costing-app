@@ -50,6 +50,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listBackups:    ()         => ipcRenderer.invoke('list-backups'),
   restoreBackup:  (filename) => ipcRenderer.invoke('restore-backup', filename),
 
+  // ── Audit trail archives ──────────────────────────────────────
+  listAuditArchives: ()              => ipcRenderer.invoke('list-audit-archives'),
+  loadAuditArchive:  (ym)            => ipcRenderer.invoke('load-audit-archive', ym),
+  saveAuditArchive:  (ym, entries)   => ipcRenderer.invoke('save-audit-archive', { ym, entries }),
+
   // ── QR Code Generation ──────────────────────────────────────────
   generateQR: (text, opts) => QRCode.toDataURL(text, { width: (opts && opts.width) || 256, margin: 1, color: { dark: '#000000', light: '#ffffff' }, errorCorrectionLevel: 'M', ...opts }),
 

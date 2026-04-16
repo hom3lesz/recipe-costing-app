@@ -323,6 +323,66 @@ ipcMain.handle('restore-sync-backup', async (_, { folderPath, filename, location
   }
 });
 
+// ─── Audit trail archives ─────────────────────────────────────────────────
+// Each archive file holds one YYYY-MM worth of rotated audit log entries.
+// Live log stays in the main data file; archives are written lazily when
+// rotation spills entries out.
+
+function _auditArchivePath(ym) {
+  // ym like "2026-04"; validate strictly to avoid path traversal
+  if (!/^\d{4}-\d{2}$/.test(ym)) return null;
+  const dir = path.join(app.getPath('userData'), 'audit-archives');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, 'audit-archive-' + ym + '.json');
+}
+
+ipcMain.handle('list-audit-archives', async () => {
+  try {
+    const dir = path.join(app.getPath('userData'), 'audit-archives');
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter(function (f) { return /^audit-archive-\d{4}-\d{2}\.json$/.test(f); })
+      .map(function (f) { return f.replace(/^audit-archive-|\.json$/g, ''); })
+      .sort()
+      .reverse();
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('load-audit-archive', async (_, ym) => {
+  try {
+    const p = _auditArchivePath(ym);
+    if (!p || !fs.existsSync(p)) return [];
+    const raw = fs.readFileSync(p, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('save-audit-archive', async (_, { ym, entries }) => {
+  try {
+    const p = _auditArchivePath(ym);
+    if (!p) return { error: 'Invalid archive key: ' + ym };
+    // Append to any existing archive for the same month, deduped by entry id
+    let existing = [];
+    if (fs.existsSync(p)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(p, 'utf8')) || [];
+      } catch (e) { existing = []; }
+    }
+    const seen = new Set(existing.map(function (e) { return e.id; }));
+    const toAdd = (entries || []).filter(function (e) { return e && e.id && !seen.has(e.id); });
+    const merged = existing.concat(toAdd);
+    fs.writeFileSync(p, JSON.stringify(merged));
+    return { ok: true, added: toAdd.length };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
 ipcMain.handle('open-folder', (_, folderPath) => {
   if (folderPath && fs.existsSync(folderPath)) shell.openPath(folderPath);
 });
