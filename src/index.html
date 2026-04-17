@@ -837,7 +837,14 @@
       <h2 id="ing-modal-title">Add Ingredient</h2>
       <button class="modal-close" onclick="closeIngredientModal()">✕</button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body" style="padding:0">
+      <!-- Tab bar -->
+      <div id="ing-modal-tabs" style="display:flex;border-bottom:1px solid var(--border);padding:0 16px;background:var(--bg-card2)">
+        <button class="ing-tab-btn active" data-tab="ing-tab-details" onclick="switchIngTab('ing-tab-details')" style="padding:10px 16px;font-size:12px;font-weight:600;border:none;background:none;color:var(--text-primary);cursor:pointer;border-bottom:2px solid var(--accent);margin-bottom:-1px">Details</button>
+        <button class="ing-tab-btn" data-tab="ing-tab-history" onclick="switchIngTab('ing-tab-history')" style="padding:10px 16px;font-size:12px;font-weight:600;border:none;background:none;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">History</button>
+      </div>
+      <!-- Details tab -->
+      <div id="ing-tab-details" style="padding:16px 20px">
 
       <!-- Row 1: Name full width -->
       <div class="form-group" style="margin-bottom:12px">
@@ -991,7 +998,12 @@
         <div id="allergen-detect-hint" class="allergen-detect-hint" style="display:none"></div>
         <div class="allergen-grid" id="allergen-grid"></div>
       </div>
-    </div>
+      </div><!-- /ing-tab-details -->
+      <!-- History tab -->
+      <div id="ing-tab-history" style="display:none;padding:16px 20px;max-height:400px;overflow-y:auto">
+        <div id="history-ingredient-feed" style="min-height:100px"></div>
+      </div>
+    </div><!-- /modal-body -->
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeIngredientModal()">Cancel</button>
       <button class="btn-primary" onclick="saveIngredient()">Save Ingredient</button>
@@ -1007,6 +1019,18 @@
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeConfirm(false)">Cancel</button>
       <button class="btn-danger" onclick="closeConfirm(true)">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Revert Confirm Modal -->
+<div id="revert-confirm-modal" class="modal-overlay hidden" style="z-index:1001">
+  <div class="modal modal-sm" style="max-width:440px">
+    <div class="modal-header"><h2 id="revert-confirm-title">Revert Change</h2></div>
+    <div class="modal-body" id="revert-confirm-body"></div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="revert-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="revert-confirm-btn" style="background:var(--orange)">Revert</button>
     </div>
   </div>
 </div>
@@ -1121,7 +1145,14 @@
       <h2 id="supplier-modal-title">Add Supplier</h2>
       <button class="modal-close" onclick="closeSupplierModal()">✕</button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body" style="padding:0">
+      <!-- Tab bar -->
+      <div id="sup-modal-tabs" style="display:flex;border-bottom:1px solid var(--border);padding:0 16px;background:var(--bg-card2)">
+        <button class="sup-tab-btn active" data-tab="sup-tab-details" onclick="switchSupTab('sup-tab-details')" style="padding:10px 16px;font-size:12px;font-weight:600;border:none;background:none;color:var(--text-primary);cursor:pointer;border-bottom:2px solid var(--accent);margin-bottom:-1px">Details</button>
+        <button class="sup-tab-btn" data-tab="sup-tab-history" onclick="switchSupTab('sup-tab-history')" style="padding:10px 16px;font-size:12px;font-weight:600;border:none;background:none;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px">History</button>
+      </div>
+      <!-- Details tab -->
+      <div id="sup-tab-details" style="padding:16px 20px">
       <div class="form-grid">
         <div class="form-group"><label>Company Name *</label><input type="text" id="sup-name" placeholder="e.g. Fresh Direct Ltd"></input></div>
         <div class="form-group"><label>Contact Name</label><input type="text" id="sup-contact" placeholder="e.g. John Smith"></input></div>
@@ -1133,7 +1164,12 @@
       <div class="form-group" style="margin-top:12px"><label>Notes</label>
         <textarea id="sup-notes" class="recipe-notes" style="min-height:50px" placeholder="Minimum order, lead times, payment terms…"></textarea>
       </div>
-    </div>
+      </div><!-- /sup-tab-details -->
+      <!-- History tab -->
+      <div id="sup-tab-history" style="display:none;padding:16px 20px;max-height:400px;overflow-y:auto">
+        <div id="history-supplier-feed" style="min-height:100px"></div>
+      </div>
+    </div><!-- /modal-body -->
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeSupplierModal()">Cancel</button>
       <button class="btn-primary" onclick="saveSupplier()">Save Supplier</button>
