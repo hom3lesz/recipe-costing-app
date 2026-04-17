@@ -1962,6 +1962,12 @@ let confirmCallback = null;
 let recipeSnapshot = null;
 let dragSrcIdx = null;
 let _loadSnapshot = null; // populated by Audit.buildSnapshot after load + after location switches
+// Exposed so activity-view.js can refresh the snapshot after a revert mutates state
+// directly (without this, save() would detect the mutation as an unlogged change and
+// double-log it alongside the restore entry that revertEntry already appended).
+window.refreshAuditSnapshot = function () {
+  if (window.Audit) _loadSnapshot = window.Audit.buildSnapshot(state);
+};
 let _currentBulkHandle = null; // set during bulk operations to suppress per-record diffs
 
 // ─── Init ─────────────────────────────────────────────────────
@@ -14532,6 +14538,11 @@ function renderSettingsPage() {
   if (dmEl) dmEl.checked = !!state.darkMode;
   const wdEl = document.getElementById("setting-warn-duplicates");
   if (wdEl) wdEl.checked = state.warnDuplicates !== false;
+  // Activity Log panel (Phase 2)
+  if (typeof ActivityView !== 'undefined' && ActivityView.render) {
+    ActivityView.render();
+    ActivityView._initFilterListeners();
+  }
 }
 
 async function saveUsdaKeySettings() {

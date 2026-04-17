@@ -378,8 +378,8 @@
     var result = Audit.revertEntry(state, entry, deviceName);
     if (result.success) {
       // Refresh snapshot so the next save() diff does not re-log the revert
-      if (typeof _loadSnapshot !== 'undefined' && window.Audit) {
-        _loadSnapshot = window.Audit.buildSnapshot(state);
+      if (typeof window !== 'undefined' && typeof window.refreshAuditSnapshot === 'function') {
+        window.refreshAuditSnapshot();
       }
       // Trigger save
       if (typeof save === 'function') save();
