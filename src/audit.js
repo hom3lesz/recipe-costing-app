@@ -19,6 +19,7 @@
 
   // ─── Schema / tracking constants ──────────────────────────────────────────
   const SCHEMA_VERSION = 2;
+  const MIGRATION_STAMP = 'migration';
 
   const TRACKED_COLLECTIONS = ['ingredients', 'recipes', 'suppliers'];
 
@@ -586,6 +587,7 @@
   // ─── Public API (filled in by later tasks) ────────────────────────────────
   return {
     SCHEMA_VERSION,
+    MIGRATION_STAMP,
     TRACKED_COLLECTIONS,
     INGREDIENT_TRACKED_FIELDS,
     RECIPE_TRACKED_FIELDS,

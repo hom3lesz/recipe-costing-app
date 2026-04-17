@@ -381,3 +381,10 @@ describe('bulk wrapper', () => {
     expect(handle.skipIds.size).toBe(2);
   });
 });
+
+describe('MIGRATION_STAMP', () => {
+  test('is exported as the literal string "migration"', () => {
+    const Audit = require('../audit.js');
+    expect(Audit.MIGRATION_STAMP).toBe('migration');
+  });
+});
