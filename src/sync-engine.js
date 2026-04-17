@@ -56,9 +56,159 @@
     return merged;
   }
 
+  const TOP_COLLECTIONS = [
+    { key: 'ingredients', entityType: 'ingredient' },
+    { key: 'recipes',     entityType: 'recipe' },
+    { key: 'suppliers',   entityType: 'supplier' },
+  ];
+
+  function _deepClone(v) {
+    // JSON round-trip is sufficient — audit/records are JSON-serializable.
+    return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+  }
+
+  function _shallowEqual(a, b) {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+    const ka = Object.keys(a);
+    const kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) {
+      if (a[k] !== b[k]) return false;
+    }
+    return true;
+  }
+
+  function _uuid() {
+    // Non-cryptographic, adequate for audit ids.
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  function _findDeleteEntry(auditLog, entityType, entityId) {
+    if (!Array.isArray(auditLog)) return null;
+    let latest = null;
+    for (const e of auditLog) {
+      if (!e || e.op !== 'delete') continue;
+      if (e.entityType !== entityType || e.entityId !== entityId) continue;
+      if (!latest || e.ts > latest.ts) latest = e;
+    }
+    return latest;
+  }
+
+  function _modAt(record) {
+    return (record && record._modifiedAt) ? record._modifiedAt : '';
+  }
+
+  function _mergeCollectionCase1(
+    localArr, remoteArr, entityType, mergedAuditLog, deviceName, restoreEntries
+  ) {
+    // Build lookup maps by id.
+    const localById = new Map();
+    const remoteById = new Map();
+    for (const r of (localArr || [])) if (r && r.id) localById.set(r.id, r);
+    for (const r of (remoteArr || [])) if (r && r.id) remoteById.set(r.id, r);
+
+    const mergedById = new Map();
+    const allIds = new Set([...localById.keys(), ...remoteById.keys()]);
+
+    for (const id of allIds) {
+      const L = localById.get(id);
+      const R = remoteById.get(id);
+
+      if (L && !R) {
+        // Case 1a: local-only.
+        const del = _findDeleteEntry(mergedAuditLog, entityType, id);
+        if (del) {
+          if (_modAt(L) > del.ts) {
+            // Resurrect.
+            mergedById.set(id, _deepClone(L));
+            restoreEntries.push({
+              id: _uuid(),
+              ts: new Date().toISOString(),
+              op: 'restore',
+              by: deviceName,
+              entityType,
+              entityId: id,
+              notes: 'resurrected after conflicting delete',
+              revertedEntryId: del.id,
+            });
+          } else {
+            // Accept delete — drop from merged.
+          }
+        } else {
+          mergedById.set(id, _deepClone(L));
+        }
+      } else if (!L && R) {
+        // Case 1b: remote-only, mirror.
+        const del = _findDeleteEntry(mergedAuditLog, entityType, id);
+        if (del) {
+          if (_modAt(R) > del.ts) {
+            mergedById.set(id, _deepClone(R));
+            restoreEntries.push({
+              id: _uuid(),
+              ts: new Date().toISOString(),
+              op: 'restore',
+              by: deviceName,
+              entityType,
+              entityId: id,
+              notes: 'resurrected after conflicting delete',
+              revertedEntryId: del.id,
+            });
+          }
+        } else {
+          mergedById.set(id, _deepClone(R));
+        }
+      } else if (L && R) {
+        // Case 2 stub — Tasks 5–6 refine. Keep local for now.
+        mergedById.set(id, _deepClone(L));
+      }
+    }
+
+    return Array.from(mergedById.values());
+  }
+
+  function mergeState(localState, remoteState, lastSyncAt, deviceName) {
+    const mergedState = {};
+    const conflicts = [];
+    const restoreEntries = [];
+    const stats = { merged: 0, conflicts: 0, restored: 0 };
+
+    // 1. Merge audit logs first so Case 1 can scan delete entries.
+    const mergedAuditLog = _mergeAuditLogs(
+      localState.auditLog,
+      remoteState.auditLog
+    );
+    mergedState.auditLog = mergedAuditLog;
+
+    // 2. Merge each top-level collection.
+    for (const col of TOP_COLLECTIONS) {
+      mergedState[col.key] = _mergeCollectionCase1(
+        localState[col.key],
+        remoteState[col.key],
+        col.entityType,
+        mergedAuditLog,
+        deviceName,
+        restoreEntries
+      );
+    }
+
+    // 3. Settings passthrough for now (Task 5 refines).
+    mergedState.settings = _deepClone(localState.settings || {});
+
+    stats.restored = restoreEntries.length;
+    stats.conflicts = conflicts.length;
+
+    return { mergedState, conflicts, restoreEntries, stats };
+  }
+
   return {
     isMigrationStamp,
     checkSchemaVersion,
     _mergeAuditLogs,
+    mergeState,
   };
 }));

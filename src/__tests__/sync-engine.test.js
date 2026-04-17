@@ -75,3 +75,129 @@ describe('mergeAuditLogs helper (internal)', () => {
       .toHaveLength(1);
   });
 });
+
+function mkState(over) {
+  return Object.assign({
+    ingredients: [],
+    recipes: [],
+    suppliers: [],
+    settings: {},
+    auditLog: [],
+  }, over);
+}
+
+function mkIng(id, over) {
+  return Object.assign({
+    id,
+    name: 'Ing ' + id,
+    packCost: 1.00,
+    _modifiedAt: '2026-04-10T00:00:00Z',
+    _modifiedBy: 'laptop',
+  }, over || {});
+}
+
+describe('mergeState Case 1 - one-sided records', () => {
+  test('local-only record with no remote delete → kept', () => {
+    const local = mkState({ ingredients: [mkIng('a')] });
+    const remote = mkState();
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients).toHaveLength(1);
+    expect(result.mergedState.ingredients[0].id).toBe('a');
+    expect(result.conflicts).toHaveLength(0);
+    expect(result.restoreEntries).toHaveLength(0);
+  });
+
+  test('local-only + remote delete entry, local newer → resurrected + restore entry', () => {
+    const local = mkState({
+      ingredients: [mkIng('a', { _modifiedAt: '2026-04-15T00:00:00Z' })],
+    });
+    const remote = mkState({
+      auditLog: [{
+        id: 'del-1',
+        ts: '2026-04-12T00:00:00Z',
+        op: 'delete',
+        entityType: 'ingredient',
+        entityId: 'a',
+        by: 'desktop',
+      }],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients).toHaveLength(1);
+    expect(result.restoreEntries).toHaveLength(1);
+    expect(result.restoreEntries[0].op).toBe('restore');
+    expect(result.restoreEntries[0].entityId).toBe('a');
+    expect(result.restoreEntries[0].notes).toMatch(/resurrected/i);
+    expect(result.restoreEntries[0].revertedEntryId).toBe('del-1');
+    expect(result.restoreEntries[0].by).toBe('laptop');
+  });
+
+  test('local-only + remote delete entry, delete newer → removed', () => {
+    const local = mkState({
+      ingredients: [mkIng('a', { _modifiedAt: '2026-04-10T00:00:00Z' })],
+    });
+    const remote = mkState({
+      auditLog: [{
+        id: 'del-1',
+        ts: '2026-04-15T00:00:00Z',
+        op: 'delete',
+        entityType: 'ingredient',
+        entityId: 'a',
+        by: 'desktop',
+      }],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients).toHaveLength(0);
+    expect(result.restoreEntries).toHaveLength(0);
+  });
+
+  test('remote-only with no local delete → kept on both sides', () => {
+    const local = mkState();
+    const remote = mkState({ ingredients: [mkIng('b')] });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients).toHaveLength(1);
+    expect(result.mergedState.ingredients[0].id).toBe('b');
+  });
+
+  test('remote-only + local delete entry, remote newer → resurrected', () => {
+    const local = mkState({
+      auditLog: [{
+        id: 'del-2',
+        ts: '2026-04-10T00:00:00Z',
+        op: 'delete',
+        entityType: 'ingredient',
+        entityId: 'b',
+        by: 'laptop',
+      }],
+    });
+    const remote = mkState({
+      ingredients: [mkIng('b', { _modifiedAt: '2026-04-15T00:00:00Z' })],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients).toHaveLength(1);
+    expect(result.restoreEntries).toHaveLength(1);
+    expect(result.restoreEntries[0].revertedEntryId).toBe('del-2');
+  });
+
+  test('both deleted → stays deleted, no resurrect', () => {
+    const local = mkState({
+      auditLog: [{ id: 'del-x', ts: '2026-04-10T00:00:00Z', op: 'delete', entityType: 'ingredient', entityId: 'a', by: 'laptop' }],
+    });
+    const remote = mkState({
+      auditLog: [{ id: 'del-y', ts: '2026-04-11T00:00:00Z', op: 'delete', entityType: 'ingredient', entityId: 'a', by: 'desktop' }],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients).toHaveLength(0);
+    expect(result.restoreEntries).toHaveLength(0);
+  });
+
+  test('merged auditLog contains both delete entries deduped', () => {
+    const local = mkState({
+      auditLog: [{ id: 'del-x', ts: '2026-04-10T00:00:00Z', op: 'delete', entityType: 'ingredient', entityId: 'a', by: 'laptop' }],
+    });
+    const remote = mkState({
+      auditLog: [{ id: 'del-y', ts: '2026-04-11T00:00:00Z', op: 'delete', entityType: 'ingredient', entityId: 'a', by: 'desktop' }],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.auditLog.map(e => e.id).sort()).toEqual(['del-x', 'del-y']);
+  });
+});
