@@ -420,6 +420,82 @@
     appendLogEntries(state, [entry]);
   }
 
+  // ─── Staleness check (Phase 2) ────────────────────────────────────────────
+  function _collectionForEntity(entity) {
+    if (entity === 'ingredient') return 'ingredients';
+    if (entity === 'recipe') return 'recipes';
+    if (entity === 'supplier') return 'suppliers';
+    if (entity === 'recipeIngredient') return 'recipes';
+    if (entity === 'subRecipe') return 'recipes';
+    return null;
+  }
+
+  function _idKeyForNestedEntity(entity) {
+    if (entity === 'recipeIngredient') return 'ingId';
+    if (entity === 'subRecipe') return 'recipeId';
+    return null;
+  }
+
+  function _nestedArrayKey(entity) {
+    if (entity === 'recipeIngredient') return 'ingredients';
+    if (entity === 'subRecipe') return 'subRecipes';
+    return null;
+  }
+
+  function checkStaleness(state, entry) {
+    var isNested = entry.entity === 'recipeIngredient' || entry.entity === 'subRecipe';
+
+    if (entry.op === 'delete') {
+      var collection = _collectionForEntity(entry.entity);
+      if (!collection) return { recordMissing: true, stale: false, revertValue: entry.before };
+
+      if (isNested) {
+        var parentRec = (state.recipes || []).find(function (r) { return r && r.id === entry.parentId; });
+        if (!parentRec) return { recordMissing: true, stale: false, revertValue: entry.before };
+        var arrKey = _nestedArrayKey(entry.entity);
+        var idKey = _idKeyForNestedEntity(entry.entity);
+        var rows = parentRec[arrKey] || [];
+        var row = rows.find(function (r) { return r && r[idKey] === entry.entityId; });
+        if (row) return { recordMissing: false, stale: true, revertValue: entry.before };
+        return { recordMissing: true, stale: false, revertValue: entry.before };
+      }
+
+      var list = state[collection] || [];
+      var existing = list.find(function (r) { return r && r.id === entry.entityId; });
+      if (existing) return { recordMissing: false, stale: true, revertValue: entry.before };
+      return { recordMissing: true, stale: false, revertValue: entry.before };
+    }
+
+    // update entries
+    if (isNested) {
+      var parentRec2 = (state.recipes || []).find(function (r) { return r && r.id === entry.parentId; });
+      if (!parentRec2) return { recordMissing: true };
+      var arrKey2 = _nestedArrayKey(entry.entity);
+      var idKey2 = _idKeyForNestedEntity(entry.entity);
+      var rows2 = parentRec2[arrKey2] || [];
+      var row2 = rows2.find(function (r) { return r && r[idKey2] === entry.entityId; });
+      if (!row2) return { recordMissing: true };
+      var currentVal = row2[entry.field];
+      return {
+        stale: !_shallowEqual(currentVal, entry.after),
+        currentValue: currentVal,
+        revertValue: entry.before,
+      };
+    }
+
+    var collection2 = _collectionForEntity(entry.entity);
+    if (!collection2) return { recordMissing: true };
+    var list2 = state[collection2] || [];
+    var record = list2.find(function (r) { return r && r.id === entry.entityId; });
+    if (!record) return { recordMissing: true };
+    var curVal = record[entry.field];
+    return {
+      stale: !_shallowEqual(curVal, entry.after),
+      currentValue: curVal,
+      revertValue: entry.before,
+    };
+  }
+
   // ─── Public API (filled in by later tasks) ────────────────────────────────
   return {
     SCHEMA_VERSION,
@@ -437,5 +513,6 @@
     rotateLog,
     startBulk,
     endBulk,
+    checkStaleness,
   };
 }));
