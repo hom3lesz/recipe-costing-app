@@ -5775,6 +5775,7 @@ function renderRecipeEditor() {
               <div class="rh-more-item" onclick="openMenuModal();closeRecipeMoreMenu('${recipe.id}')">📄 Export menu PDF</div>
               <div class="rh-more-item" onclick="openSpecialsBoard();closeRecipeMoreMenu('${recipe.id}')">📋 Specials board</div>
               <div class="rh-more-item" onclick="printAllergenSheet();closeRecipeMoreMenu('${recipe.id}')">⚠️ Allergen sheet</div>
+              <div class="rh-more-item" onclick="toggleRecipeHistory('${recipe.id}');closeRecipeMoreMenu('${recipe.id}')">🕒 Edit history</div>
               <div class="rh-more-item" onclick="openRecipeImport();closeRecipeMoreMenu('${recipe.id}')">✨ Import recipe (AI)</div>
               <div class="rh-more-item" onclick="printRecipeCard('${recipe.id}');closeRecipeMoreMenu('${recipe.id}')">🪪 Recipe card</div>
               <div class="rh-more-item" onclick="printAllergenQRCard('${recipe.id}');closeRecipeMoreMenu('${recipe.id}')">📱 Allergen QR card</div>
@@ -6156,6 +6157,18 @@ function renderRecipeEditor() {
       </div>
     </div>
   `;
+
+  // Append recipe history panel (hidden by default, Phase 2)
+  var histPanel = document.getElementById('recipe-history-panel');
+  if (!histPanel) {
+    histPanel = document.createElement('div');
+    histPanel.id = 'recipe-history-panel';
+    histPanel.style.cssText = 'display:none;border-top:2px solid var(--border);padding:16px;max-height:350px;overflow-y:auto';
+    histPanel.innerHTML = '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:12px">📋 Edit History</div><div id="history-recipe-feed"></div>';
+    editor.appendChild(histPanel);
+  } else {
+    editor.appendChild(histPanel);
+  }
 
   initDragDrop();
   // Enhance the in-recipe ingredient filter input (Esc clear, × button)
@@ -8683,6 +8696,8 @@ function renderIngredientLibrary() {
 // ─── Ingredient Modal ──────────────────────────────────────────
 function openIngredientModal(id = null, prefillName = "") {
   editingIngredientId = id;
+  // Reset to Details tab (Phase 2)
+  if (typeof switchIngTab === 'function') switchIngTab('ing-tab-details');
   const title = document.getElementById("ing-modal-title");
   // Always rebuild category dropdown dynamically
   const ingCatSel = document.getElementById("ing-category");
@@ -11638,6 +11653,57 @@ function closeConfirm(result) {
   }
 }
 
+// ─── Ingredient Modal Tab Switching ─────────────────────────────────
+function switchIngTab(tabId) {
+  var tabs = ['ing-tab-details', 'ing-tab-history'];
+  tabs.forEach(function (t) {
+    var panel = document.getElementById(t);
+    var btn = document.querySelector('.ing-tab-btn[data-tab="' + t + '"]');
+    if (panel) panel.style.display = t === tabId ? '' : 'none';
+    if (btn) {
+      btn.classList.toggle('active', t === tabId);
+      btn.style.color = t === tabId ? 'var(--text-primary)' : 'var(--text-muted)';
+      btn.style.borderBottomColor = t === tabId ? 'var(--accent)' : 'transparent';
+    }
+  });
+  if (tabId === 'ing-tab-history' && editingIngredientId && typeof ActivityView !== 'undefined') {
+    ActivityView.renderHistoryTab('ingredient', editingIngredientId);
+  }
+}
+
+// ─── Supplier Modal Tab Switching ───────────────────────────────────
+function switchSupTab(tabId) {
+  var tabs = ['sup-tab-details', 'sup-tab-history'];
+  tabs.forEach(function (t) {
+    var panel = document.getElementById(t);
+    var btn = document.querySelector('.sup-tab-btn[data-tab="' + t + '"]');
+    if (panel) panel.style.display = t === tabId ? '' : 'none';
+    if (btn) {
+      btn.classList.toggle('active', t === tabId);
+      btn.style.color = t === tabId ? 'var(--text-primary)' : 'var(--text-muted)';
+      btn.style.borderBottomColor = t === tabId ? 'var(--accent)' : 'transparent';
+    }
+  });
+  if (tabId === 'sup-tab-history' && typeof ActivityView !== 'undefined') {
+    var supId = document.getElementById('supplier-modal').dataset.editId;
+    if (supId) ActivityView.renderHistoryTab('supplier', supId);
+  }
+}
+
+// ─── Recipe History Toggle ──────────────────────────────────────────
+function toggleRecipeHistory(recipeId) {
+  var panel = document.getElementById('recipe-history-panel');
+  if (!panel) return;
+  if (panel.style.display === 'none') {
+    panel.style.display = '';
+    if (typeof ActivityView !== 'undefined') {
+      ActivityView.renderHistoryTab('recipe', recipeId);
+    }
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
 // ─── Excel Import ──────────────────────────────────────────────
 let importState = {
   workbook: null,
@@ -13508,6 +13574,11 @@ let editingSupplierId = null;
 function openSupplierModal(id) {
   id = id || null;
   editingSupplierId = id;
+  // Store editing supplier ID for history tab (Phase 2)
+  var supModalEl = document.getElementById('supplier-modal');
+  if (supModalEl) supModalEl.dataset.editId = id || '';
+  // Reset to Details tab (Phase 2)
+  if (typeof switchSupTab === 'function') switchSupTab('sup-tab-details');
   const sup = id ? state.suppliers.find((s) => s.id === id) : null;
   document.getElementById("supplier-modal-title").textContent = sup
     ? "Edit Supplier"
