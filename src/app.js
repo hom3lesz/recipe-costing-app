@@ -11699,6 +11699,11 @@ function toggleRecipeHistory(recipeId) {
     if (typeof ActivityView !== 'undefined') {
       ActivityView.renderHistoryTab('recipe', recipeId);
     }
+    // Scroll the panel into view — #recipe-editor is overflow-y:auto so the
+    // panel at the bottom is below the viewport until we scroll to it.
+    setTimeout(function () {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 10);
   } else {
     panel.style.display = 'none';
   }
