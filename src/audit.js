@@ -496,6 +496,93 @@
     };
   }
 
+  // ─── Revert entry (Phase 2) ───────────────────────────────────────────────
+  function revertEntry(state, entry, deviceName) {
+    var isNested = entry.entity === 'recipeIngredient' || entry.entity === 'subRecipe';
+    var collection = _collectionForEntity(entry.entity);
+    var nowIso = new Date().toISOString();
+
+    if (entry.op === 'update') {
+      if (isNested) {
+        var parentRec = (state.recipes || []).find(function (r) { return r && r.id === entry.parentId; });
+        if (!parentRec) return { success: false, error: 'This record no longer exists (parent recipe missing).' };
+        var arrKey = _nestedArrayKey(entry.entity);
+        var idKey = _idKeyForNestedEntity(entry.entity);
+        var rows = parentRec[arrKey] || [];
+        var row = rows.find(function (r) { return r && r[idKey] === entry.entityId; });
+        if (!row) return { success: false, error: 'This record no longer exists (nested row missing).' };
+        var prevVal = row[entry.field];
+        row[entry.field] = _deepClone(entry.before);
+        var restoreEntry = {
+          id: newLogId(),
+          ts: nowIso,
+          device: deviceName || 'Unknown',
+          op: 'restore',
+          entity: entry.entity,
+          entityId: entry.entityId,
+          entityName: entry.entityName,
+          parentId: entry.parentId,
+          field: entry.field,
+          before: _deepClone(prevVal),
+          after: _deepClone(entry.before),
+          revertedEntryId: entry.id,
+        };
+        appendLogEntries(state, [restoreEntry]);
+        return { success: true, restoreEntry: restoreEntry };
+      }
+
+      // Top-level update revert
+      var list = state[collection] || [];
+      var record = list.find(function (r) { return r && r.id === entry.entityId; });
+      if (!record) return { success: false, error: 'This record no longer exists.' };
+      var prevVal2 = record[entry.field];
+      record[entry.field] = _deepClone(entry.before);
+      record._modifiedAt = nowIso;
+      record._modifiedBy = deviceName || 'Unknown';
+      var restoreEntry2 = {
+        id: newLogId(),
+        ts: nowIso,
+        device: deviceName || 'Unknown',
+        op: 'restore',
+        entity: entry.entity,
+        entityId: entry.entityId,
+        entityName: entry.entityName,
+        field: entry.field,
+        before: _deepClone(prevVal2),
+        after: _deepClone(entry.before),
+        revertedEntryId: entry.id,
+      };
+      appendLogEntries(state, [restoreEntry2]);
+      return { success: true, restoreEntry: restoreEntry2 };
+    }
+
+    if (entry.op === 'delete') {
+      // Re-create record from the before snapshot
+      var snapshot = _deepClone(entry.before);
+      snapshot.id = entry.entityId;
+      snapshot._modifiedAt = nowIso;
+      snapshot._modifiedBy = deviceName || 'Unknown';
+      if (!state[collection]) state[collection] = [];
+      state[collection].push(snapshot);
+      var restoreEntry3 = {
+        id: newLogId(),
+        ts: nowIso,
+        device: deviceName || 'Unknown',
+        op: 'restore',
+        entity: entry.entity,
+        entityId: entry.entityId,
+        entityName: entry.entityName,
+        before: null,
+        after: _deepClone(snapshot),
+        revertedEntryId: entry.id,
+      };
+      appendLogEntries(state, [restoreEntry3]);
+      return { success: true, restoreEntry: restoreEntry3 };
+    }
+
+    return { success: false, error: 'Only update and delete entries can be reverted.' };
+  }
+
   // ─── Public API (filled in by later tasks) ────────────────────────────────
   return {
     SCHEMA_VERSION,
@@ -514,5 +601,6 @@
     startBulk,
     endBulk,
     checkStaleness,
+    revertEntry,
   };
 }));

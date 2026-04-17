@@ -130,3 +130,201 @@ describe('checkStaleness', () => {
     expect(result.currentValue).toBe('new@b.c');
   });
 });
+
+describe('revertEntry', () => {
+  test('update revert sets field back to before value', () => {
+    const state = {
+      ingredients: [{ id: 'ing1', name: 'Cucumber', packCost: 0.90 }],
+      recipes: [], suppliers: [], auditLog: [],
+    };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'update', entity: 'ingredient',
+      entityId: 'ing1', entityName: 'Cucumber',
+      field: 'packCost', before: 0.85, after: 0.90,
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(true);
+    expect(state.ingredients[0].packCost).toBe(0.85);
+  });
+
+  test('update revert creates a restore log entry', () => {
+    const state = {
+      ingredients: [{ id: 'ing1', name: 'Cucumber', packCost: 0.90 }],
+      recipes: [], suppliers: [], auditLog: [],
+    };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'update', entity: 'ingredient',
+      entityId: 'ing1', entityName: 'Cucumber',
+      field: 'packCost', before: 0.85, after: 0.90,
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.restoreEntry).toBeDefined();
+    expect(result.restoreEntry.op).toBe('restore');
+    expect(result.restoreEntry.entity).toBe('ingredient');
+    expect(result.restoreEntry.entityId).toBe('ing1');
+    expect(result.restoreEntry.field).toBe('packCost');
+    expect(result.restoreEntry.before).toBe(0.90);
+    expect(result.restoreEntry.after).toBe(0.85);
+    expect(state.auditLog.length).toBe(1);
+    expect(state.auditLog[0].op).toBe('restore');
+  });
+
+  test('delete revert re-creates record in collection', () => {
+    const state = { ingredients: [], recipes: [], suppliers: [], auditLog: [] };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'delete', entity: 'ingredient',
+      entityId: 'ing1', entityName: 'Old Beef',
+      before: { name: 'Old Beef', packCost: 12, packSize: 1000, unit: 'g', yieldPct: 92 },
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(true);
+    expect(state.ingredients.length).toBe(1);
+    expect(state.ingredients[0].id).toBe('ing1');
+    expect(state.ingredients[0].name).toBe('Old Beef');
+    expect(state.ingredients[0].packCost).toBe(12);
+    expect(state.ingredients[0]._modifiedAt).toBeDefined();
+    expect(state.ingredients[0]._modifiedBy).toBe('TestPC');
+  });
+
+  test('delete revert creates a restore log entry', () => {
+    const state = { ingredients: [], recipes: [], suppliers: [], auditLog: [] };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'delete', entity: 'ingredient',
+      entityId: 'ing1', entityName: 'Old Beef',
+      before: { name: 'Old Beef', packCost: 12 },
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.restoreEntry.op).toBe('restore');
+    expect(result.restoreEntry.entity).toBe('ingredient');
+    expect(result.restoreEntry.after).toEqual(expect.objectContaining({ name: 'Old Beef' }));
+    expect(state.auditLog.length).toBe(1);
+  });
+
+  test('delete revert for recipe re-creates with nested arrays', () => {
+    const state = { ingredients: [], recipes: [], suppliers: [], auditLog: [] };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'delete', entity: 'recipe',
+      entityId: 'rec1', entityName: 'Salad',
+      before: {
+        name: 'Salad', category: 'Starters', portions: 4,
+        ingredients: [{ ingId: 'ing1', qty: 2 }],
+        subRecipes: [],
+      },
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(true);
+    expect(state.recipes.length).toBe(1);
+    expect(state.recipes[0].id).toBe('rec1');
+    expect(state.recipes[0].ingredients).toEqual([{ ingId: 'ing1', qty: 2 }]);
+  });
+
+  test('nested recipeIngredient update revert', () => {
+    const state = {
+      ingredients: [],
+      recipes: [{
+        id: 'rec1', name: 'Salad',
+        ingredients: [{ ingId: 'ing1', qty: 5, recipeUnit: 'each' }],
+        subRecipes: [],
+      }],
+      suppliers: [], auditLog: [],
+    };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'update',
+      entity: 'recipeIngredient', entityId: 'ing1', parentId: 'rec1',
+      entityName: 'Salad', field: 'qty', before: 2, after: 5,
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(true);
+    expect(state.recipes[0].ingredients[0].qty).toBe(2);
+  });
+
+  test('nested subRecipe update revert', () => {
+    const state = {
+      ingredients: [],
+      recipes: [{
+        id: 'rec1', name: 'Main',
+        ingredients: [],
+        subRecipes: [{ recipeId: 'rec2', qty: 3, recipeUnit: 'portions' }],
+      }],
+      suppliers: [], auditLog: [],
+    };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'update',
+      entity: 'subRecipe', entityId: 'rec2', parentId: 'rec1',
+      entityName: 'Main', field: 'qty', before: 1, after: 3,
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(true);
+    expect(state.recipes[0].subRecipes[0].qty).toBe(1);
+  });
+
+  test('returns error when record not found (update)', () => {
+    const state = { ingredients: [], recipes: [], suppliers: [], auditLog: [] };
+    const entry = {
+      id: 'log_1', op: 'update', entity: 'ingredient',
+      entityId: 'ing1', entityName: 'Ghost',
+      field: 'packCost', before: 0.85, after: 0.90,
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/no longer exists/i);
+  });
+
+  test('returns error when nested parent not found', () => {
+    const state = { ingredients: [], recipes: [], suppliers: [], auditLog: [] };
+    const entry = {
+      id: 'log_1', op: 'update', entity: 'recipeIngredient',
+      entityId: 'ing1', parentId: 'rec1', entityName: 'Salad',
+      field: 'qty', before: 2, after: 5,
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/no longer exists/i);
+  });
+
+  test('returns error when nested row not found in parent', () => {
+    const state = {
+      ingredients: [],
+      recipes: [{ id: 'rec1', name: 'Salad', ingredients: [], subRecipes: [] }],
+      suppliers: [], auditLog: [],
+    };
+    const entry = {
+      id: 'log_1', op: 'update', entity: 'recipeIngredient',
+      entityId: 'ing1', parentId: 'rec1', entityName: 'Salad',
+      field: 'qty', before: 2, after: 5,
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/no longer exists/i);
+  });
+
+  test('supplier update revert works', () => {
+    const state = {
+      ingredients: [], recipes: [],
+      suppliers: [{ id: 'sup1', name: 'Brakes', email: 'a@b.c' }],
+      auditLog: [],
+    };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'update', entity: 'supplier',
+      entityId: 'sup1', entityName: 'Brakes',
+      field: 'email', before: 'old@b.c', after: 'a@b.c',
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(true);
+    expect(state.suppliers[0].email).toBe('old@b.c');
+  });
+
+  test('supplier delete revert re-creates supplier', () => {
+    const state = { ingredients: [], recipes: [], suppliers: [], auditLog: [] };
+    const entry = {
+      id: 'log_1', ts: '2026-04-15T10:00:00Z', op: 'delete', entity: 'supplier',
+      entityId: 'sup1', entityName: 'OldSup',
+      before: { name: 'OldSup', email: 'x@y.z', phone: '999' },
+    };
+    const result = Audit.revertEntry(state, entry, 'TestPC');
+    expect(result.success).toBe(true);
+    expect(state.suppliers.length).toBe(1);
+    expect(state.suppliers[0].id).toBe('sup1');
+    expect(state.suppliers[0].name).toBe('OldSup');
+  });
+});
