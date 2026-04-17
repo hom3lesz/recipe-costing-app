@@ -36,8 +36,29 @@
     };
   }
 
+  function _mergeAuditLogs(localLog, remoteLog) {
+    const byId = new Map();
+    const add = (arr) => {
+      if (!Array.isArray(arr)) return;
+      for (const entry of arr) {
+        if (!entry || !entry.id) continue;
+        if (!byId.has(entry.id)) byId.set(entry.id, entry);
+      }
+    };
+    add(localLog);
+    add(remoteLog);
+    const merged = Array.from(byId.values());
+    merged.sort((a, b) => {
+      if (a.ts < b.ts) return -1;
+      if (a.ts > b.ts) return 1;
+      return 0;
+    });
+    return merged;
+  }
+
   return {
     isMigrationStamp,
     checkSchemaVersion,
+    _mergeAuditLogs,
   };
 }));

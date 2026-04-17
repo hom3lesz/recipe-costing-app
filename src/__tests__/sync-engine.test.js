@@ -41,3 +41,37 @@ describe('checkSchemaVersion', () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe('mergeAuditLogs helper (internal)', () => {
+  test('dedupes by entry.id', () => {
+    const local = [
+      { id: 'a', ts: '2026-04-17T10:00:00Z', op: 'update' },
+      { id: 'b', ts: '2026-04-17T11:00:00Z', op: 'update' },
+    ];
+    const remote = [
+      { id: 'b', ts: '2026-04-17T11:00:00Z', op: 'update' },
+      { id: 'c', ts: '2026-04-17T12:00:00Z', op: 'update' },
+    ];
+    const merged = SyncEngine._mergeAuditLogs(local, remote);
+    expect(merged.map(e => e.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('sorts ascending by ts', () => {
+    const local = [
+      { id: 'c', ts: '2026-04-17T12:00:00Z', op: 'update' },
+      { id: 'a', ts: '2026-04-17T10:00:00Z', op: 'update' },
+    ];
+    const remote = [
+      { id: 'b', ts: '2026-04-17T11:00:00Z', op: 'update' },
+    ];
+    const merged = SyncEngine._mergeAuditLogs(local, remote);
+    expect(merged.map(e => e.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  test('handles missing or empty inputs', () => {
+    expect(SyncEngine._mergeAuditLogs(undefined, undefined)).toEqual([]);
+    expect(SyncEngine._mergeAuditLogs([], [])).toEqual([]);
+    expect(SyncEngine._mergeAuditLogs([{ id: 'a', ts: '1', op: 'update' }], undefined))
+      .toHaveLength(1);
+  });
+});
