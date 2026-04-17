@@ -471,7 +471,7 @@
           <button class="btn-secondary" onclick="openRestoreModal()">↩ Restore</button>
         </div>
       </div>
-      <div style="padding:24px 28px 40px;max-width:760px;display:flex;flex-direction:column;gap:20px">
+      <div style="padding:24px 28px 40px;max-width:960px;display:flex;flex-direction:column;gap:20px">
 
       <!-- General Settings -->
       <div class="card">
@@ -752,6 +752,63 @@
           <input type="password" id="usda-key-input-settings" placeholder="USDA API key…" style="flex:1;max-width:260px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:monospace;font-size:11px;padding:5px 8px;border-radius:4px;outline:none">
           <button class="btn-secondary btn-sm" onclick="saveUsdaKeySettings()">💾 Save</button>
           <button class="btn-secondary btn-sm" onclick="clearUsdaKeySettings()" style="color:var(--red)">🗑 Clear</button>
+        </div>
+      </div>
+
+      <!-- Activity Log -->
+      <div class="card" id="activity-log-panel">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">📋 Activity Log</div>
+        <div style="display:flex;gap:16px;min-height:300px">
+          <!-- Left sidebar: filters -->
+          <div style="width:200px;flex-shrink:0;display:flex;flex-direction:column;gap:14px">
+            <!-- Entity toggles -->
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600">Show</div>
+              <div style="display:flex;flex-wrap:wrap;gap:4px">
+                <button class="btn-secondary btn-sm activity-entity-toggle active" data-entity="ingredient" style="font-size:11px;padding:3px 8px">Ingredients</button>
+                <button class="btn-secondary btn-sm activity-entity-toggle active" data-entity="recipe" style="font-size:11px;padding:3px 8px">Recipes</button>
+                <button class="btn-secondary btn-sm activity-entity-toggle active" data-entity="supplier" style="font-size:11px;padding:3px 8px">Suppliers</button>
+              </div>
+            </div>
+            <!-- Operation toggles -->
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600">Operations</div>
+              <div style="display:flex;flex-wrap:wrap;gap:4px">
+                <button class="btn-secondary btn-sm activity-op-toggle active" data-op="create" style="font-size:11px;padding:3px 8px">Create</button>
+                <button class="btn-secondary btn-sm activity-op-toggle active" data-op="update" style="font-size:11px;padding:3px 8px">Update</button>
+                <button class="btn-secondary btn-sm activity-op-toggle active" data-op="delete" style="font-size:11px;padding:3px 8px">Delete</button>
+              </div>
+            </div>
+            <!-- Date range -->
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600">Date range</div>
+              <select id="activity-date-range" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:5px 8px;border-radius:5px;outline:none">
+                <option value="1">Today</option>
+                <option value="7" selected>Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="all">All time</option>
+              </select>
+            </div>
+            <!-- Search -->
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600">Search</div>
+              <input type="text" id="activity-search" placeholder="Filter by name..." style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:5px 8px;border-radius:5px;outline:none;box-sizing:border-box">
+            </div>
+            <!-- Archives -->
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600">Archives</div>
+              <select id="activity-archives" style="width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:12px;padding:5px 8px;border-radius:5px;outline:none">
+                <option value="">Archives...</option>
+              </select>
+            </div>
+          </div>
+          <!-- Right column: feed -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-bottom:1px solid var(--border)">
+              <span id="activity-log-count" style="font-size:12px;color:var(--text-muted)">0 entries</span>
+            </div>
+            <div id="activity-log-feed" style="flex:1;overflow-y:auto;max-height:400px"></div>
+          </div>
         </div>
       </div>
 
@@ -2566,6 +2623,7 @@ double cream, 2.20" style="width:100%;background:var(--bg-input);border:1px soli
 
 
 <script src="audit.js"></script>
+<script src="activity-view.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
