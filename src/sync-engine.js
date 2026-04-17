@@ -103,8 +103,32 @@
     return (record && record._modifiedAt) ? record._modifiedAt : '';
   }
 
-  function _mergeCollectionCase1(
-    localArr, remoteArr, entityType, mergedAuditLog, deviceName, restoreEntries
+  function _mergeRecordCase2(L, R, lastSyncAt, deviceName, conflicts, entityType, parentId) {
+    // Returns the merged record.
+    if (_shallowEqual(L, R)) return _deepClone(L);
+
+    const lMod = _modAt(L);
+    const rMod = _modAt(R);
+
+    // Bootstrap: treat null lastSyncAt as "no basis for change detection" → LWW.
+    if (lastSyncAt === null || lastSyncAt === undefined) {
+      return _deepClone(lMod >= rMod ? L : R);
+    }
+
+    const localChanged  = lMod  > lastSyncAt;
+    const remoteChanged = rMod > lastSyncAt;
+
+    if (localChanged && !remoteChanged) return _deepClone(L);
+    if (!localChanged && remoteChanged) return _deepClone(R);
+    if (!localChanged && !remoteChanged) return _deepClone(L); // defensive
+
+    // Both changed — Task 6 handles field-level diff. For now, LWW fallback.
+    return _deepClone(lMod >= rMod ? L : R);
+  }
+
+  function _mergeCollection(
+    localArr, remoteArr, entityType, mergedAuditLog, deviceName,
+    restoreEntries, lastSyncAt, conflicts
   ) {
     // Build lookup maps by id.
     const localById = new Map();
@@ -163,8 +187,9 @@
           mergedById.set(id, _deepClone(R));
         }
       } else if (L && R) {
-        // Case 2 stub — Tasks 5–6 refine. Keep local for now.
-        mergedById.set(id, _deepClone(L));
+        mergedById.set(id, _mergeRecordCase2(
+          L, R, lastSyncAt, deviceName, conflicts, entityType, null
+        ));
       }
     }
 
@@ -186,18 +211,25 @@
 
     // 2. Merge each top-level collection.
     for (const col of TOP_COLLECTIONS) {
-      mergedState[col.key] = _mergeCollectionCase1(
+      mergedState[col.key] = _mergeCollection(
         localState[col.key],
         remoteState[col.key],
         col.entityType,
         mergedAuditLog,
         deviceName,
-        restoreEntries
+        restoreEntries,
+        lastSyncAt,
+        conflicts
       );
     }
 
-    // 3. Settings passthrough for now (Task 5 refines).
-    mergedState.settings = _deepClone(localState.settings || {});
+    // 3. Merge settings as a single record with synthetic id.
+    const localSettings = localState.settings || {};
+    const remoteSettings = remoteState.settings || {};
+    mergedState.settings = _mergeRecordCase2(
+      localSettings, remoteSettings, lastSyncAt, deviceName, conflicts,
+      'settings', null
+    );
 
     stats.restored = restoreEntries.length;
     stats.conflicts = conflicts.length;

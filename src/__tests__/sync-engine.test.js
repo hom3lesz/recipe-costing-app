@@ -201,3 +201,71 @@ describe('mergeState Case 1 - one-sided records', () => {
     expect(result.mergedState.auditLog.map(e => e.id).sort()).toEqual(['del-x', 'del-y']);
   });
 });
+
+describe('mergeState Case 2 - both sides exist, no field conflicts', () => {
+  test('identical records → no-op', () => {
+    const ing = mkIng('a', { packCost: 2.5, _modifiedAt: '2026-04-10T00:00:00Z' });
+    const local = mkState({ ingredients: [ing] });
+    const remote = mkState({ ingredients: [{ ...ing }] });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients).toHaveLength(1);
+    expect(result.mergedState.ingredients[0].packCost).toBe(2.5);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  test('only local changed → keeps local', () => {
+    const local = mkState({
+      ingredients: [mkIng('a', { packCost: 5.0, _modifiedAt: '2026-04-15T00:00:00Z', _modifiedBy: 'laptop' })],
+    });
+    const remote = mkState({
+      ingredients: [mkIng('a', { packCost: 1.0, _modifiedAt: '2026-04-08T00:00:00Z', _modifiedBy: 'desktop' })],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients[0].packCost).toBe(5.0);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  test('only remote changed → takes remote', () => {
+    const local = mkState({
+      ingredients: [mkIng('a', { packCost: 1.0, _modifiedAt: '2026-04-08T00:00:00Z', _modifiedBy: 'laptop' })],
+    });
+    const remote = mkState({
+      ingredients: [mkIng('a', { packCost: 5.0, _modifiedAt: '2026-04-15T00:00:00Z', _modifiedBy: 'desktop' })],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.ingredients[0].packCost).toBe(5.0);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  test('bootstrap (lastSync=null), identical → no-op', () => {
+    const ing = mkIng('a', { packCost: 2.5 });
+    const local = mkState({ ingredients: [ing] });
+    const remote = mkState({ ingredients: [{ ...ing }] });
+    const result = SyncEngine.mergeState(local, remote, null, 'laptop');
+    expect(result.conflicts).toHaveLength(0);
+    expect(result.mergedState.ingredients[0].packCost).toBe(2.5);
+  });
+
+  test('bootstrap differ → LWW wins, no conflicts', () => {
+    const local = mkState({
+      ingredients: [mkIng('a', { packCost: 1.0, _modifiedAt: '2026-04-08T00:00:00Z' })],
+    });
+    const remote = mkState({
+      ingredients: [mkIng('a', { packCost: 2.0, _modifiedAt: '2026-04-12T00:00:00Z' })],
+    });
+    const result = SyncEngine.mergeState(local, remote, null, 'laptop');
+    expect(result.mergedState.ingredients[0].packCost).toBe(2.0);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  test('settings merged via LWW (one-sided change)', () => {
+    const local = mkState({
+      settings: { currency: 'GBP', _modifiedAt: '2026-04-08T00:00:00Z', _modifiedBy: 'laptop' },
+    });
+    const remote = mkState({
+      settings: { currency: 'USD', _modifiedAt: '2026-04-15T00:00:00Z', _modifiedBy: 'desktop' },
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.settings.currency).toBe('USD');
+  });
+});
