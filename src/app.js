@@ -2172,6 +2172,7 @@ async function init() {
   }
 
   // Check sync folder for newer backups from another device
+  _loadConflictQueue();
   _checkSyncOnStartup();
 
   // Enhance all search inputs (Esc clear, × button, persistence)
@@ -14235,6 +14236,39 @@ async function restoreFromBackup(filename) {
   }
 }
 
+// ─── Conflict Queue (Phase 3) ───────────────────────────────────────────────
+var _CONFLICT_QUEUE_KEY = 'recipeCosting.conflictQueue';
+window._conflictQueue = [];
+
+function _loadConflictQueue() {
+  try {
+    var raw = localStorage.getItem(_CONFLICT_QUEUE_KEY);
+    window._conflictQueue = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    window._conflictQueue = [];
+  }
+  return window._conflictQueue;
+}
+
+function _saveConflictQueue(queue) {
+  window._conflictQueue = queue || [];
+  try {
+    localStorage.setItem(_CONFLICT_QUEUE_KEY, JSON.stringify(window._conflictQueue));
+  } catch (e) {
+    console.warn('[ConflictQueue] save failed', e);
+  }
+}
+
+function _conflictSummaryToast(n) {
+  if (!n) return;
+  showToast(
+    'Synced. ' + n + ' conflict' + (n === 1 ? '' : 's')
+      + ' pending — will prompt to resolve in an upcoming update.',
+    'info',
+    4000
+  );
+}
+
 // ─── Cloud Sync / Folder Backup ─────────────────────────────────
 function _getSyncSettings() {
   try {
@@ -14309,6 +14343,8 @@ async function runSyncNow() {
         vatRate: state.vatRate,
         recipeCategories: state.recipeCategories
       },
+      auditLog: state.auditLog || [],
+      _schemaVersion: (window.Audit && window.Audit.SCHEMA_VERSION) || 2,
       exportDate: new Date().toISOString(),
       version: state.version || '0.0.12',
       deviceName: _getDeviceName(),
@@ -14558,6 +14594,7 @@ async function restoreSyncBackup(filename) {
       if (data.settings.vatRate !== undefined) state.vatRate = data.settings.vatRate;
       if (data.settings.recipeCategories) state.recipeCategories = data.settings.recipeCategories;
     }
+    if (Array.isArray(data.auditLog)) state.auditLog = data.auditLog;
     await save();
     showToast('✓ Cloud backup restored — reloading…', 'success', 2000);
     setTimeout(function() { location.reload(); }, 1800);
