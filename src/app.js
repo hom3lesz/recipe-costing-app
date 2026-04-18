@@ -3626,13 +3626,30 @@ function _getActiveLocationSlug() {
 }
 
 let _autoSyncDebounce = null;
-function _autoSyncToCloud() {
+async function _autoSyncToCloud() {
   try {
     const s = _getSyncSettings();
     if (!s.folder || !s.autoSync) return;
     // Debounce: only sync at most once per 30 seconds
     if (_autoSyncDebounce) return;
     _autoSyncDebounce = setTimeout(function() { _autoSyncDebounce = null; }, 30000);
+
+    // Stale-check: if remote has advanced since we last saw it, skip push.
+    // Next manual sync will pull + merge.
+    try {
+      const recheck = await window.electronAPI.listSyncBackups(s.folder, _getActiveLocationSlug());
+      const newest = recheck && recheck[0];
+      const lastSeen = s.lastSeenRemoteTimestamp || '';
+      if (newest && lastSeen) {
+        const pull = await window.electronAPI.restoreSyncBackup(s.folder, newest.name, _getActiveLocationSlug());
+        if (pull && pull.data && pull.data.dataTimestamp && pull.data.dataTimestamp > lastSeen) {
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('[AutoSync] stale-check failed', e);
+    }
+
     const data = {
       recipes: state.recipes,
       ingredients: state.ingredients,
@@ -3643,6 +3660,8 @@ function _autoSyncToCloud() {
         vatRate: state.vatRate,
         recipeCategories: state.recipeCategories
       },
+      auditLog: state.auditLog || [],
+      _schemaVersion: (window.Audit && window.Audit.SCHEMA_VERSION) || 2,
       exportDate: new Date().toISOString(),
       version: state.version || '0.0.12',
       deviceName: _getDeviceName(),
@@ -3651,6 +3670,7 @@ function _autoSyncToCloud() {
     window.electronAPI.syncBackupToFolder(s.folder, data, _getActiveLocationSlug()).then(function(res) {
       if (res && !res.error) {
         s.lastSync = new Date().toISOString();
+        s.lastSeenRemoteTimestamp = data.dataTimestamp;
         _saveSyncSettings(s);
       }
     }).catch(function() {});
