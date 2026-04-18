@@ -122,8 +122,55 @@
     if (!localChanged && remoteChanged) return _deepClone(R);
     if (!localChanged && !remoteChanged) return _deepClone(L); // defensive
 
-    // Both changed — Task 6 handles field-level diff. For now, LWW fallback.
-    return _deepClone(lMod >= rMod ? L : R);
+    // Both changed — field-level diff.
+    const merged = _deepClone(L);
+    const lMig = isMigrationStamp(L._modifiedBy);
+    const rMig = isMigrationStamp(R._modifiedBy);
+
+    const allKeys = new Set([...Object.keys(L || {}), ...Object.keys(R || {})]);
+    for (const f of allKeys) {
+      if (f === '_modifiedAt' || f === '_modifiedBy') continue;
+      if (_valuesEqual(L[f], R[f])) continue;
+
+      if (lMig && !rMig) {
+        merged[f] = _deepClone(R[f]);
+      } else if (rMig && !lMig) {
+        merged[f] = _deepClone(L[f]);
+      } else if (lMig && rMig) {
+        merged[f] = _deepClone(lMod >= rMod ? L[f] : R[f]);
+      } else {
+        conflicts.push({
+          id: 'conflict-' + _uuid(),
+          detectedAt: new Date().toISOString(),
+          entityType,
+          entityId: L.id,
+          entityName: L.name || R.name || '',
+          parentId: parentId || null,
+          field: f,
+          localValue: _deepClone(L[f]),
+          localModifiedAt: L._modifiedAt || null,
+          localModifiedBy: L._modifiedBy || null,
+          remoteValue: _deepClone(R[f]),
+          remoteModifiedAt: R._modifiedAt || null,
+          remoteModifiedBy: R._modifiedBy || null,
+          kind: 'field-conflict',
+        });
+        merged[f] = _deepClone(L[f]);
+      }
+    }
+
+    merged._modifiedAt = lMod >= rMod ? lMod : rMod;
+    merged._modifiedBy = lMod >= rMod ? L._modifiedBy : R._modifiedBy;
+    return merged;
+  }
+
+  function _valuesEqual(a, b) {
+    if (a === b) return true;
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch (e) {
+      return false;
+    }
   }
 
   function _mergeCollection(
