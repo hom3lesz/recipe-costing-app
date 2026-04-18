@@ -156,3 +156,23 @@ describe('formatEntry', () => {
     expect(html).not.toContain('revert-btn');
   });
 });
+
+describe('formatEntry on resolve-conflict', () => {
+  test('renders the ⚖ icon, label, and before→after diff', () => {
+    var entry = {
+      id: 'log-1', ts: '2026-04-18T10:00:00Z', device: 'This device',
+      op: 'resolve-conflict', entity: 'ingredient',
+      entityId: 'a', entityName: 'Cucumber',
+      field: 'packCost', before: 2.5, after: 2.75,
+      conflictId: 'c1',
+    };
+    var html = ActivityView.formatEntry(entry, 'This device');
+    expect(html).toContain('⚖');
+    expect(html).toContain('Resolved conflict');
+    expect(html).toContain('Cucumber');
+    expect(html).toContain('packCost');
+    expect(html).toContain('2.5');
+    expect(html).toContain('2.75');
+    expect(html).toMatch(/data-entry-id="log-1"/);
+  });
+});

@@ -87,7 +87,7 @@
     var device = _escHtml(entry.device || '');
     var name = '<strong>' + _escHtml(entry.entityName) + '</strong>';
     var entityLabel = _escHtml(entry.entity);
-    var canRevert = (entry.op === 'update' || entry.op === 'delete');
+    var canRevert = (entry.op === 'update' || entry.op === 'delete' || entry.op === 'resolve-conflict');
     var revertBtn = canRevert
       ? ' <button class="btn-secondary btn-sm revert-btn" data-entry-id="' + _escHtml(entry.id) + '" title="Revert this change" style="font-size:11px;padding:2px 8px;margin-left:8px">↩ Revert</button>'
       : '';
@@ -109,6 +109,14 @@
       if (entry.field) {
         desc += ' <span style="color:var(--text-muted)">' + _escHtml(entry.field) + '</span>';
       }
+    } else if (entry.op === 'resolve-conflict') {
+      desc = '⚖ Resolved conflict on ' + entityLabel + ' <b>' + _escHtml(entry.entityName) + '</b> '
+        + '<span style="color:var(--text-muted)">' + _escHtml(entry.field) + '</span>'
+        + '<div style="margin-top:4px;font-size:12px">'
+        + '<span style="text-decoration:line-through;color:var(--red)">' + _formatValue(entry.before) + '</span>'
+        + ' &rarr; '
+        + '<span style="color:var(--green)">' + _formatValue(entry.after) + '</span>'
+        + '</div>';
     } else if (entry.op === 'bulk-update') {
       desc = 'Bulk updated ' + entityLabel + ' — ' + name;
       if (entry.count) desc += ' <span style="color:var(--text-muted)">(' + entry.count + ' changes)</span>';
@@ -336,7 +344,7 @@
     var entityLabel = _escHtml(entry.entityName);
     var html = '';
 
-    if (entry.op === 'update') {
+    if (entry.op === 'update' || entry.op === 'resolve-conflict') {
       titleEl.textContent = 'Revert Update';
       html += '<div style="font-size:13px;margin-bottom:12px">Revert <strong>' + entityLabel + '</strong> field <code>' + _escHtml(entry.field) + '</code>:</div>';
       html += '<div style="padding:10px 14px;background:var(--bg-card2);border:1px solid var(--border);border-radius:6px;margin-bottom:12px">'
