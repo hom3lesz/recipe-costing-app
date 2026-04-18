@@ -684,6 +684,9 @@
           </div>
 
           <div id="sync-status" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
+          <div id="conflict-badge" class="hidden" style="font-size:12px;margin-bottom:10px;display:inline-flex;align-items:center;gap:6px;background:var(--red);color:white;padding:4px 10px;border-radius:12px;cursor:pointer" onclick="ConflictResolver.openResolver()" title="Resolve sync conflicts">
+            <span>⚠</span><span id="conflict-badge-count">0</span><span>conflict(s) pending</span>
+          </div>
           <div id="sync-backup-list" style="display:flex;flex-direction:column;gap:6px"></div>
         </div>
       </div>
@@ -1031,6 +1034,23 @@
     <div class="modal-footer">
       <button class="btn-secondary" id="revert-cancel-btn">Cancel</button>
       <button class="btn-primary" id="revert-confirm-btn" style="background:var(--orange)">Revert</button>
+    </div>
+  </div>
+</div>
+
+<!-- Conflict Resolver Modal -->
+<div id="conflict-resolver-modal" class="modal-overlay hidden" style="z-index:1001">
+  <div class="modal" style="max-width:720px;width:90%">
+    <div class="modal-header">
+      <h3 id="conflict-resolver-title">Pending Conflicts</h3>
+      <button class="modal-close" onclick="ConflictResolver.closeResolver()">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div style="display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)">
+        <button class="btn-secondary btn-sm" onclick="ConflictResolver.resolveAll('local')">Keep all local</button>
+        <button class="btn-secondary btn-sm" onclick="ConflictResolver.resolveAll('remote')">Keep all remote</button>
+      </div>
+      <div id="conflict-resolver-list" style="max-height:60vh;overflow-y:auto"></div>
     </div>
   </div>
 </div>
@@ -2661,6 +2681,7 @@ double cream, 2.20" style="width:100%;background:var(--bg-input);border:1px soli
 <script src="audit.js"></script>
 <script src="activity-view.js"></script>
 <script src="sync-engine.js"></script>
+<script src="conflict-resolver.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
