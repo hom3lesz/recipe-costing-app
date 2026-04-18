@@ -2173,6 +2173,9 @@ async function init() {
 
   // Check sync folder for newer backups from another device
   _loadConflictQueue();
+  if (window.ConflictResolver && window.ConflictResolver.renderBadge) {
+    window.ConflictResolver.renderBadge();
+  }
   _checkSyncOnStartup();
 
   // Enhance all search inputs (Esc clear, × button, persistence)
@@ -14289,6 +14292,14 @@ function _conflictSummaryToast(n) {
   );
 }
 
+// ─── Expose helpers needed by conflict-resolver.js ────────────────────────
+window.save = save;
+window.showToast = showToast;
+window.showConfirm = showConfirm;
+window._getDeviceName = _getDeviceName;
+window._saveConflictQueue = _saveConflictQueue;
+window.refreshAuditSnapshot = (typeof refreshAuditSnapshot === 'function') ? refreshAuditSnapshot : null;
+
 // ─── Cloud Sync / Folder Backup ─────────────────────────────────
 function _getSyncSettings() {
   try {
@@ -14446,6 +14457,9 @@ async function runSyncNow() {
       const seen = new Set(reconciled.map(c => c.id));
       for (const c of newConflicts) if (!seen.has(c.id)) reconciled.push(c);
       _saveConflictQueue(reconciled);
+      if (window.ConflictResolver && window.ConflictResolver.renderBadge) {
+        window.ConflictResolver.renderBadge();
+      }
       lastSeenRemoteTimestamp = remoteData.dataTimestamp || lastSeenRemoteTimestamp;
     }
 
@@ -14497,6 +14511,9 @@ async function runSyncNow() {
       _conflictSummaryToast(queue.length);
     } else {
       showToast('✓ Synced', 'success', 2500);
+    }
+    if (window.ConflictResolver && window.ConflictResolver.renderBadge) {
+      window.ConflictResolver.renderBadge();
     }
     _renderSyncUI();
   } catch (e) {
@@ -14555,6 +14572,9 @@ async function _renderSyncUI() {
     pathEl.textContent = 'No folder selected';
     if (controlsEl) controlsEl.style.display = 'none';
     if (openBtn) openBtn.style.display = 'none';
+  }
+  if (window.ConflictResolver && window.ConflictResolver.renderBadge) {
+    window.ConflictResolver.renderBadge();
   }
 }
 
@@ -14647,6 +14667,9 @@ async function _checkSyncOnStartup() {
     _saveSyncSettings(s);
 
     if (reconciled.length) _conflictSummaryToast(reconciled.length);
+    if (window.ConflictResolver && window.ConflictResolver.renderBadge) {
+      window.ConflictResolver.renderBadge();
+    }
   } catch (e) {
     console.warn('[SyncCheck]', e);
   }
