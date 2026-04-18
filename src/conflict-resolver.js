@@ -336,6 +336,59 @@
     }
   }
 
+  async function resolveAll(winner) {
+    if (typeof window === 'undefined') return;
+    var queue = (window._conflictQueue || []).slice();
+    if (queue.length === 0) { render(); renderBadge(); return; }
+
+    var label = winner === 'local' ? 'this device' : 'remote devices';
+    if (window.showConfirm) {
+      var ok = await window.showConfirm(
+        'Resolve ' + queue.length + ' conflicts',
+        'Keep all values from ' + label + '? This will overwrite ' + queue.length + ' record(s).'
+      );
+      if (!ok) return;
+    }
+
+    var state = window.state;
+    var deviceName = (window._getDeviceName && window._getDeviceName()) || 'Unknown';
+    var applied = 0;
+    var skipped = 0;
+    var auditEntries = [];
+
+    for (var i = 0; i < queue.length; i++) {
+      var r = applyResolution(state, queue[i], winner, deviceName);
+      if (r.error === 'missing') { skipped++; continue; }
+      auditEntries.push(r.auditEntry);
+      applied++;
+    }
+
+    if (auditEntries.length) {
+      if (window.Audit && window.Audit.appendLogEntries) {
+        window.Audit.appendLogEntries(state, auditEntries);
+      } else if (state && Array.isArray(state.auditLog)) {
+        for (var j = 0; j < auditEntries.length; j++) state.auditLog.push(auditEntries[j]);
+      }
+    }
+
+    if (window._saveConflictQueue) window._saveConflictQueue([]);
+
+    try {
+      if (window.refreshAuditSnapshot) window.refreshAuditSnapshot();
+      if (window.save) await window.save();
+      if (window.refreshAuditSnapshot) window.refreshAuditSnapshot();
+    } catch (e) {
+      console.error('[ConflictResolver] save failed', e);
+    }
+
+    render(); renderBadge();
+
+    var msg = 'Resolved ' + applied + ' conflict' + (applied === 1 ? '' : 's');
+    if (skipped) msg += ' · ' + skipped + ' skipped (records deleted)';
+    if (window.showToast) window.showToast(msg, 'success', 3000);
+    setTimeout(closeResolver, 800);
+  }
+
   return {
     pruneMissingRecords: pruneMissingRecords,
     applyResolution: applyResolution,
@@ -348,5 +401,6 @@
     openResolver: openResolver,
     closeResolver: closeResolver,
     resolveConflict: resolveConflict,
+    resolveAll: resolveAll,
   };
 }));
