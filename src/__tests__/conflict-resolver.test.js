@@ -163,3 +163,78 @@ describe('applyResolution', () => {
     expect(ConflictResolver.applyResolution(state, conflict, 'local', 'D').error).toBe('missing');
   });
 });
+
+describe('entityDisplayName', () => {
+  test('top-level ingredient', () => {
+    var state = mkState({ ingredients: [{ id: 'a', name: 'Cucumber' }] });
+    expect(ConflictResolver.entityDisplayName(state, mkConflict())).toBe('Cucumber · packCost');
+  });
+  test('top-level supplier', () => {
+    var state = mkState({ suppliers: [{ id: 's1', name: 'Brakes' }] });
+    var c = mkConflict({ entityType: 'supplier', entityId: 's1', field: 'contactPhone' });
+    expect(ConflictResolver.entityDisplayName(state, c)).toBe('Brakes · contactPhone');
+  });
+  test('nested recipeIngredient', () => {
+    var state = mkState({
+      recipes: [{ id: 'r1', name: 'Carbonara', ingredients: [{ ingId: 'ing1', qty: 200 }] }],
+      ingredients: [{ id: 'ing1', name: 'Pecorino' }],
+    });
+    var c = mkConflict({ entityType: 'recipeIngredient', entityId: 'ing1', parentId: 'r1', field: 'qty' });
+    expect(ConflictResolver.entityDisplayName(state, c)).toBe('Carbonara › Pecorino qty');
+  });
+  test('nested subRecipe', () => {
+    var state = mkState({
+      recipes: [
+        { id: 'r1', name: 'Parent', subRecipes: [{ recipeId: 'r2', portions: 1 }] },
+        { id: 'r2', name: 'Sub' },
+      ],
+    });
+    var c = mkConflict({ entityType: 'subRecipe', entityId: 'r2', parentId: 'r1', field: 'portions' });
+    expect(ConflictResolver.entityDisplayName(state, c)).toBe('Parent › Sub portions');
+  });
+  test('fallback to id when parent missing', () => {
+    var c = mkConflict({ entityType: 'recipeIngredient', entityId: 'ing1', parentId: 'r1', field: 'qty' });
+    expect(ConflictResolver.entityDisplayName(mkState(), c)).toBe('r1 › ing1 qty');
+  });
+  test('fallback to id when linked ingredient missing', () => {
+    var state = mkState({
+      recipes: [{ id: 'r1', name: 'Carbonara', ingredients: [{ ingId: 'ing1', qty: 200 }] }],
+    });
+    var c = mkConflict({ entityType: 'recipeIngredient', entityId: 'ing1', parentId: 'r1', field: 'qty' });
+    expect(ConflictResolver.entityDisplayName(state, c)).toBe('Carbonara › ing1 qty');
+  });
+  test('settings', () => {
+    var c = mkConflict({ entityType: 'settings', entityId: 'vatRate', field: 'vatRate' });
+    expect(ConflictResolver.entityDisplayName(mkState(), c)).toBe('Settings · vatRate');
+  });
+});
+
+describe('formatValueForButton', () => {
+  test('short string is quoted', () => {
+    expect(ConflictResolver.formatValueForButton('hello')).toBe('"hello"');
+  });
+  test('long string is truncated with ellipsis', () => {
+    var s = 'x'.repeat(60);
+    var out = ConflictResolver.formatValueForButton(s);
+    expect(out.length).toBeLessThanOrEqual(43);
+    expect(out).toContain('…');
+  });
+  test('number', () => {
+    expect(ConflictResolver.formatValueForButton(2.5)).toBe('2.5');
+  });
+  test('boolean', () => {
+    expect(ConflictResolver.formatValueForButton(true)).toBe('Yes');
+    expect(ConflictResolver.formatValueForButton(false)).toBe('No');
+  });
+  test('array', () => {
+    expect(ConflictResolver.formatValueForButton([1, 2, 3])).toBe('[3 items]');
+  });
+  test('object', () => {
+    expect(ConflictResolver.formatValueForButton({ a: 1 })).toBe('{object}');
+  });
+  test('null, undefined, empty string', () => {
+    expect(ConflictResolver.formatValueForButton(null)).toBe('(empty)');
+    expect(ConflictResolver.formatValueForButton(undefined)).toBe('(empty)');
+    expect(ConflictResolver.formatValueForButton('')).toBe('(empty)');
+  });
+});

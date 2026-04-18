@@ -152,9 +152,46 @@
     return { error: 'missing' };
   }
 
+  function entityDisplayName(state, conflict) {
+    var et = conflict.entityType;
+    if (et === 'settings') return 'Settings · ' + conflict.field;
+
+    if (et === 'ingredient' || et === 'recipe' || et === 'supplier') {
+      var colKey = { ingredient: 'ingredients', recipe: 'recipes', supplier: 'suppliers' }[et];
+      var rec = (state[colKey] || []).find(function (r) { return r && r.id === conflict.entityId; });
+      return ((rec && rec.name) || conflict.entityId) + ' · ' + conflict.field;
+    }
+
+    if (et === 'recipeIngredient' || et === 'subRecipe') {
+      var parent = (state.recipes || []).find(function (r) { return r && r.id === conflict.parentId; });
+      var parentName = (parent && parent.name) || conflict.parentId;
+      var linkedList = et === 'recipeIngredient' ? state.ingredients : state.recipes;
+      var linked = (linkedList || []).find(function (r) { return r && r.id === conflict.entityId; });
+      var linkedName = (linked && linked.name) || conflict.entityId;
+      return parentName + ' › ' + linkedName + ' ' + conflict.field;
+    }
+
+    return conflict.entityId + ' · ' + conflict.field;
+  }
+
+  function formatValueForButton(v) {
+    if (v === null || v === undefined || v === '') return '(empty)';
+    if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'string') {
+      if (v.length > 40) return '"' + v.slice(0, 40) + '…';
+      return '"' + v + '"';
+    }
+    if (Array.isArray(v)) return '[' + v.length + ' items]';
+    if (typeof v === 'object') return '{object}';
+    return String(v);
+  }
+
   return {
     pruneMissingRecords: pruneMissingRecords,
     applyResolution: applyResolution,
+    entityDisplayName: entityDisplayName,
+    formatValueForButton: formatValueForButton,
     _findRecord: _findRecord,
   };
 }));
