@@ -14542,156 +14542,93 @@ async function _renderSyncUI() {
 async function _checkSyncOnStartup() {
   try {
     var s = _getSyncSettings();
-    if (!s.folder) return; // no sync folder configured
+    if (!s.folder) return;
 
     var backups = await window.electronAPI.listSyncBackups(s.folder, _getActiveLocationSlug());
-    if (!backups || !backups.length) return; // no backups in folder
+    if (!backups || !backups.length) return;
 
-    // Get the newest backup
-    var newest = backups[0]; // already sorted newest-first by main.js
+    var newest = backups[0];
     if (!newest) return;
 
-    // Read the newest backup to check its metadata
-    var result = await window.electronAPI.restoreSyncBackup(s.folder, newest.name, _getActiveLocationSlug());
-    if (!result || result.error || !result.data) return;
+    var pull = await window.electronAPI.restoreSyncBackup(s.folder, newest.name, _getActiveLocationSlug());
+    if (!pull || pull.error || !pull.data) return;
+    var remoteData = pull.data;
 
-    var remoteData = result.data;
-    var remoteDevice = remoteData.deviceName || 'Unknown device';
-    var remoteTimestamp = remoteData.dataTimestamp || remoteData.exportDate || '';
-    var localTimestamp = state._lastEditTimestamp || '';
-    var myDevice = _getDeviceName();
+    // Skip if newest backup is from this device (no need to merge with ourselves).
+    if ((remoteData.deviceName || '') === _getDeviceName()) return;
 
-    // If the remote backup is from this same device, skip
-    if (remoteDevice === myDevice) return;
-
-    // Compare timestamps
-    var remoteDate = remoteTimestamp ? new Date(remoteTimestamp) : null;
-    var localDate = localTimestamp ? new Date(localTimestamp) : null;
-
-    if (!remoteDate || isNaN(remoteDate)) return; // can't compare
-
-    // If local has no timestamp (first run or old data), prompt anyway
-    var remoteIsNewer = !localDate || isNaN(localDate) || remoteDate > localDate;
-
-    if (!remoteIsNewer) return; // local is newer or same, nothing to do
-
-    // Check for conflict: did we also edit since the last sync?
-    var lastSync = s.lastSync ? new Date(s.lastSync) : null;
-    var localEditedSinceSync = localDate && lastSync && localDate > lastSync;
-    var remoteEditedSinceSync = remoteDate && lastSync && remoteDate > lastSync;
-    var isConflict = localEditedSinceSync && remoteEditedSinceSync;
-
-    // Format dates for display
-    var remoteDateStr = remoteDate.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    var localDateStr = localDate && !isNaN(localDate)
-      ? localDate.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-      : 'Unknown';
-
-    // Remote has more data?
-    var remoteRecipes = (remoteData.recipes || []).length;
-    var remoteIngs = (remoteData.ingredients || []).length;
-    var localRecipes = (state.recipes || []).length;
-    var localIngs = (state.ingredients || []).length;
-
-    // Show the sync prompt modal
-    _showSyncPrompt({
-      remoteDevice: remoteDevice,
-      remoteDateStr: remoteDateStr,
-      localDevice: myDevice,
-      localDateStr: localDateStr,
-      remoteRecipes: remoteRecipes,
-      remoteIngs: remoteIngs,
-      localRecipes: localRecipes,
-      localIngs: localIngs,
-      isConflict: isConflict,
-      backupFilename: newest.name,
-      folder: s.folder
-    });
-
-  } catch(e) {
-    console.warn('[SyncCheck]', e);
-    // Silently fail — don't block app startup
-  }
-}
-
-function _showSyncPrompt(info) {
-  // Remove any existing prompt
-  var old = document.getElementById('sync-prompt-overlay');
-  if (old) old.remove();
-
-  var conflictWarning = info.isConflict
-    ? '<div style="margin:12px 0;padding:10px 14px;background:var(--red-bg);border:1px solid rgba(224,92,92,.3);border-radius:var(--radius-sm);font-size:12px;color:var(--red)">'
-      + '<b>⚠ Conflict detected:</b> Both devices have changes since the last sync. Choose which version to keep.'
-      + '</div>'
-    : '';
-
-  var overlay = document.createElement('div');
-  overlay.id = 'sync-prompt-overlay';
-  overlay.className = 'modal-overlay';
-  overlay.style.cssText = 'z-index:9999';
-  overlay.innerHTML =
-    '<div class="modal" style="width:520px;animation:modalIn .2s ease">'
-    + '<div class="modal-header"><h2>☁ Newer Data Found</h2></div>'
-    + '<div class="modal-body" style="padding:20px">'
-    + '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">A newer backup was found in your sync folder from a different device.</p>'
-    + conflictWarning
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">'
-    // Remote card
-    + '<div style="padding:14px;background:var(--accent-bg);border:1px solid var(--accent-dim);border-radius:var(--radius-sm)">'
-    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--accent);font-weight:700;margin-bottom:8px">☁ Cloud Version</div>'
-    + '<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px">' + escHtml(info.remoteDevice) + '</div>'
-    + '<div style="font-size:11px;color:var(--text-secondary)">' + escHtml(info.remoteDateStr) + '</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">' + info.remoteRecipes + ' recipes · ' + info.remoteIngs + ' ingredients</div>'
-    + '</div>'
-    // Local card
-    + '<div style="padding:14px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm)">'
-    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);font-weight:700;margin-bottom:8px">💻 This Device</div>'
-    + '<div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px">' + escHtml(info.localDevice) + '</div>'
-    + '<div style="font-size:11px;color:var(--text-secondary)">' + escHtml(info.localDateStr) + '</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">' + info.localRecipes + ' recipes · ' + info.localIngs + ' ingredients</div>'
-    + '</div>'
-    + '</div>'
-    + '</div>'
-    + '<div class="modal-footer" style="justify-content:space-between">'
-    + '<button class="btn-secondary" onclick="_syncPromptDismiss()" style="font-size:12px">Keep local data</button>'
-    + '<button class="btn-primary" onclick="_syncPromptLoadRemote(\'' + escAttr(info.backupFilename) + '\')" style="font-size:12px">☁ Load cloud version</button>'
-    + '</div>'
-    + '</div>';
-
-  document.body.appendChild(overlay);
-}
-
-function _syncPromptDismiss() {
-  var el = document.getElementById('sync-prompt-overlay');
-  if (el) el.remove();
-}
-
-async function _syncPromptLoadRemote(filename) {
-  var el = document.getElementById('sync-prompt-overlay');
-  if (el) el.remove();
-
-  var s = _getSyncSettings();
-  if (!s.folder) return;
-
-  try {
-    var result = await window.electronAPI.restoreSyncBackup(s.folder, filename, _getActiveLocationSlug());
-    if (result.error) { showToast('Sync restore failed: ' + result.error, 'error', 4000); return; }
-    var data = result.data;
-    if (data.recipes) state.recipes = data.recipes;
-    if (data.ingredients) state.ingredients = data.ingredients;
-    if (data.suppliers) state.suppliers = data.suppliers;
-    if (data.settings) {
-      if (data.settings.currency) state.currency = data.settings.currency;
-      if (data.settings.activeGP) state.activeGP = data.settings.activeGP;
-      if (data.settings.vatRate !== undefined) state.vatRate = data.settings.vatRate;
-      if (data.settings.recipeCategories) state.recipeCategories = data.settings.recipeCategories;
+    // Schema version gate — blocking modal.
+    var schemaCheck = SyncEngine.checkSchemaVersion(
+      (window.Audit && window.Audit.SCHEMA_VERSION) || 2,
+      remoteData._schemaVersion
+    );
+    if (!schemaCheck.ok) {
+      alert(schemaCheck.reason);
+      return;
     }
-    if (data.dataTimestamp) state._lastEditTimestamp = data.dataTimestamp;
+
+    var localStateForMerge = {
+      recipes: state.recipes,
+      ingredients: state.ingredients,
+      suppliers: state.suppliers,
+      settings: {
+        currency: state.currency,
+        activeGP: state.activeGP,
+        vatRate: state.vatRate,
+        recipeCategories: state.recipeCategories,
+      },
+      auditLog: state.auditLog || [],
+    };
+    var remoteStateForMerge = {
+      recipes: remoteData.recipes || [],
+      ingredients: remoteData.ingredients || [],
+      suppliers: remoteData.suppliers || [],
+      settings: Object.assign({}, remoteData.settings || {}),
+      auditLog: remoteData.auditLog || [],
+    };
+
+    var mergeResult = SyncEngine.mergeState(
+      localStateForMerge, remoteStateForMerge,
+      s.lastSync || null, _getDeviceName()
+    );
+
+    state.recipes = mergeResult.mergedState.recipes;
+    state.ingredients = mergeResult.mergedState.ingredients;
+    state.suppliers = mergeResult.mergedState.suppliers;
+    if (mergeResult.mergedState.settings) {
+      var ms = mergeResult.mergedState.settings;
+      if (ms.currency) state.currency = ms.currency;
+      if (ms.activeGP) state.activeGP = ms.activeGP;
+      if (ms.vatRate !== undefined) state.vatRate = ms.vatRate;
+      if (ms.recipeCategories) state.recipeCategories = ms.recipeCategories;
+    }
+    state.auditLog = mergeResult.mergedState.auditLog;
+    if (mergeResult.restoreEntries.length && window.Audit && window.Audit.appendLogEntries) {
+      window.Audit.appendLogEntries(state, mergeResult.restoreEntries);
+    }
+
+    if (window.refreshAuditSnapshot) window.refreshAuditSnapshot();
     await save();
-    showToast('✓ Cloud version loaded from ' + (data.deviceName || 'cloud') + ' — reloading…', 'success', 2500);
-    setTimeout(function() { location.reload(); }, 2000);
-  } catch(e) {
-    showToast('Sync restore failed: ' + e.message, 'error', 4000);
+    if (window.refreshAuditSnapshot) window.refreshAuditSnapshot();
+
+    var existingQueue = _loadConflictQueue();
+    var reconciled = SyncEngine.reconcileConflictQueue(
+      existingQueue,
+      { recipes: state.recipes, ingredients: state.ingredients, suppliers: state.suppliers, settings: mergeResult.mergedState.settings },
+      remoteStateForMerge
+    );
+    var seen = new Set(reconciled.map(function (c) { return c.id; }));
+    for (var i = 0; i < mergeResult.conflicts.length; i++) {
+      var c = mergeResult.conflicts[i];
+      if (!seen.has(c.id)) reconciled.push(c);
+    }
+    _saveConflictQueue(reconciled);
+    s.lastSeenRemoteTimestamp = remoteData.dataTimestamp || s.lastSeenRemoteTimestamp;
+    _saveSyncSettings(s);
+
+    if (reconciled.length) _conflictSummaryToast(reconciled.length);
+  } catch (e) {
+    console.warn('[SyncCheck]', e);
   }
 }
 
