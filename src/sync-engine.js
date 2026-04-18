@@ -399,10 +399,53 @@
     return { mergedState, conflicts, restoreEntries, stats };
   }
 
+  function _findRecord(state, entityType, entityId, parentId) {
+    if (entityType === 'settings') return state.settings || null;
+    const colKey = {
+      ingredient: 'ingredients',
+      recipe: 'recipes',
+      supplier: 'suppliers',
+    }[entityType];
+    if (colKey) {
+      return (state[colKey] || []).find(r => r && r.id === entityId) || null;
+    }
+    if (entityType === 'recipeIngredient' || entityType === 'subRecipe') {
+      const parent = (state.recipes || []).find(r => r && r.id === parentId);
+      if (!parent) return null;
+      const arrKey = entityType === 'recipeIngredient' ? 'ingredients' : 'subRecipes';
+      const idKey = entityType === 'recipeIngredient' ? 'ingId' : 'recipeId';
+      return (parent[arrKey] || []).find(r => r && r[idKey] === entityId) || null;
+    }
+    return null;
+  }
+
+  function reconcileConflictQueue(queue, currentState, remoteState) {
+    if (!Array.isArray(queue) || queue.length === 0) return [];
+    const kept = [];
+    for (const c of queue) {
+      const L = _findRecord(currentState, c.entityType, c.entityId, c.parentId);
+      const R = _findRecord(remoteState, c.entityType, c.entityId, c.parentId);
+
+      if (c.kind === 'field-conflict') {
+        if (!L || !R) continue;
+        if (_valuesEqual(L[c.field], R[c.field])) continue;
+        kept.push(c);
+      } else if (c.kind === 'delete-vs-edit' || c.kind === 'edit-vs-delete') {
+        if (!L && !R) continue;
+        if (L && R && _shallowEqual(L, R)) continue;
+        kept.push(c);
+      } else {
+        kept.push(c);
+      }
+    }
+    return kept;
+  }
+
   return {
     isMigrationStamp,
     checkSchemaVersion,
     _mergeAuditLogs,
     mergeState,
+    reconcileConflictQueue,
   };
 }));

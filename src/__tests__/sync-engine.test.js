@@ -457,3 +457,57 @@ describe('mergeState - nested recipe rows', () => {
     expect(result.mergedState.recipes[0]._modifiedAt).toBe('2026-04-20T00:00:00Z');
   });
 });
+
+describe('reconcileConflictQueue', () => {
+  test('drops entry when both sides now agree on field', () => {
+    const queue = [{
+      id: 'c1', kind: 'field-conflict',
+      entityType: 'ingredient', entityId: 'a', field: 'packCost',
+      localValue: 2.5, remoteValue: 2.75,
+    }];
+    const local = mkState({ ingredients: [mkIng('a', { packCost: 3.0 })] });
+    const remote = mkState({ ingredients: [mkIng('a', { packCost: 3.0 })] });
+    const result = SyncEngine.reconcileConflictQueue(queue, local, remote);
+    expect(result).toHaveLength(0);
+  });
+
+  test('keeps entry when divergence persists', () => {
+    const queue = [{
+      id: 'c1', kind: 'field-conflict',
+      entityType: 'ingredient', entityId: 'a', field: 'packCost',
+      localValue: 2.5, remoteValue: 2.75,
+    }];
+    const local = mkState({ ingredients: [mkIng('a', { packCost: 2.5 })] });
+    const remote = mkState({ ingredients: [mkIng('a', { packCost: 2.75 })] });
+    const result = SyncEngine.reconcileConflictQueue(queue, local, remote);
+    expect(result).toHaveLength(1);
+  });
+
+  test('drops entry when entity no longer exists on either side', () => {
+    const queue = [{
+      id: 'c1', kind: 'field-conflict',
+      entityType: 'ingredient', entityId: 'a', field: 'packCost',
+      localValue: 2.5, remoteValue: 2.75,
+    }];
+    const local = mkState();
+    const remote = mkState();
+    const result = SyncEngine.reconcileConflictQueue(queue, local, remote);
+    expect(result).toHaveLength(0);
+  });
+
+  test('nested recipeIngredient conflict reconciles via parentId lookup', () => {
+    const queue = [{
+      id: 'c1', kind: 'field-conflict',
+      entityType: 'recipeIngredient', entityId: 'i1', parentId: 'r1',
+      field: 'qty', localValue: 200, remoteValue: 300,
+    }];
+    const local = mkState({
+      recipes: [mkRecipe('r1', { ingredients: [mkRow('ingId', 'i1', { qty: 250 })] })],
+    });
+    const remote = mkState({
+      recipes: [mkRecipe('r1', { ingredients: [mkRow('ingId', 'i1', { qty: 250 })] })],
+    });
+    const result = SyncEngine.reconcileConflictQueue(queue, local, remote);
+    expect(result).toHaveLength(0);
+  });
+});
