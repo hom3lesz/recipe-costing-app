@@ -1,6 +1,6 @@
 {
   "name": "recipe-costing-app",
-  "version": "0.0.25",
+  "version": "0.0.26",
   "description": "Restaurant Recipe Costing & GP Calculator",
   "main": "main.js",
   "scripts": {
