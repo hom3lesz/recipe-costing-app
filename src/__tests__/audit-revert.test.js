@@ -328,3 +328,55 @@ describe('revertEntry', () => {
     expect(state.suppliers[0].name).toBe('OldSup');
   });
 });
+
+describe('revertEntry on resolve-conflict entries', () => {
+  test('reverts a top-level resolve-conflict like an update', () => {
+    var state = {
+      ingredients: [{ id: 'a', name: 'Cucumber', packCost: 2.75, _modifiedAt: '2026-04-18T10:00:00Z', _modifiedBy: 'This device' }],
+      recipes: [],
+      suppliers: [],
+      auditLog: [],
+    };
+    var entry = {
+      id: 'log-1',
+      ts: '2026-04-18T10:00:00Z',
+      device: 'This device',
+      op: 'resolve-conflict',
+      entity: 'ingredient',
+      entityId: 'a',
+      entityName: 'Cucumber',
+      field: 'packCost',
+      before: 2.5,
+      after: 2.75,
+      conflictId: 'conflict-xyz',
+    };
+    var result = Audit.revertEntry(state, entry, 'This device');
+    expect(result.success).toBe(true);
+    expect(state.ingredients[0].packCost).toBe(2.5);
+    expect(result.restoreEntry.op).toBe('restore');
+    expect(result.restoreEntry.before).toBe(2.75);
+    expect(result.restoreEntry.after).toBe(2.5);
+    expect(result.restoreEntry.revertedEntryId).toBe('log-1');
+  });
+
+  test('reverts a nested recipeIngredient resolve-conflict', () => {
+    var state = {
+      ingredients: [{ id: 'ing1', name: 'Pecorino' }],
+      recipes: [{
+        id: 'r1', name: 'Carbonara',
+        ingredients: [{ ingId: 'ing1', qty: 300 }],
+      }],
+      suppliers: [],
+      auditLog: [],
+    };
+    var entry = {
+      id: 'log-2', ts: '2026-04-18T10:00:00Z', device: 'This device',
+      op: 'resolve-conflict', entity: 'recipeIngredient',
+      entityId: 'ing1', entityName: 'Pecorino', parentId: 'r1',
+      field: 'qty', before: 200, after: 300, conflictId: 'c1',
+    };
+    var result = Audit.revertEntry(state, entry, 'This device');
+    expect(result.success).toBe(true);
+    expect(state.recipes[0].ingredients[0].qty).toBe(200);
+  });
+});

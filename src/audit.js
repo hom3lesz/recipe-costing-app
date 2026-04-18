@@ -503,7 +503,7 @@
     var collection = _collectionForEntity(entry.entity);
     var nowIso = new Date().toISOString();
 
-    if (entry.op === 'update') {
+    if (entry.op === 'update' || entry.op === 'resolve-conflict') {
       if (isNested) {
         var parentRec = (state.recipes || []).find(function (r) { return r && r.id === entry.parentId; });
         if (!parentRec) return { success: false, error: 'This record no longer exists (parent recipe missing).' };
@@ -581,7 +581,7 @@
       return { success: true, restoreEntry: restoreEntry3 };
     }
 
-    return { success: false, error: 'Only update and delete entries can be reverted.' };
+    return { success: false, error: 'Only update, resolve-conflict, and delete entries can be reverted.' };
   }
 
   // ─── Public API (filled in by later tasks) ────────────────────────────────
