@@ -367,3 +367,93 @@ describe('mergeState Case 2c - field-level diff', () => {
     expect(result.mergedState.ingredients[0].packCost).toBe(2.75); // remote newer
   });
 });
+
+function mkRecipe(id, over) {
+  return Object.assign({
+    id, name: 'Recipe ' + id, ingredients: [], subRecipes: [],
+    _modifiedAt: '2026-04-10T00:00:00Z', _modifiedBy: 'laptop',
+  }, over || {});
+}
+function mkRow(idKey, id, over) {
+  const row = Object.assign({
+    qty: 100, unit: 'g',
+    _modifiedAt: '2026-04-10T00:00:00Z', _modifiedBy: 'laptop',
+  }, over || {});
+  row[idKey] = id;
+  return row;
+}
+
+describe('mergeState - nested recipe rows', () => {
+  test('nested ingredient added on one side → included in merged recipe', () => {
+    const local = mkState({ recipes: [mkRecipe('r1', { ingredients: [mkRow('ingId', 'i1')] })] });
+    const remote = mkState({ recipes: [mkRecipe('r1', { ingredients: [] })] });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.recipes[0].ingredients).toHaveLength(1);
+    expect(result.mergedState.recipes[0].ingredients[0].ingId).toBe('i1');
+  });
+
+  test('nested ingredient edited both sides same field → field-conflict with parentId', () => {
+    const local = mkState({
+      recipes: [mkRecipe('r1', {
+        _modifiedAt: '2026-04-15T10:00:00Z',
+        ingredients: [mkRow('ingId', 'i1', { qty: 200, _modifiedAt: '2026-04-15T10:00:00Z', _modifiedBy: 'laptop' })],
+      })],
+    });
+    const remote = mkState({
+      recipes: [mkRecipe('r1', {
+        _modifiedAt: '2026-04-15T11:00:00Z',
+        ingredients: [mkRow('ingId', 'i1', { qty: 300, _modifiedAt: '2026-04-15T11:00:00Z', _modifiedBy: 'desktop' })],
+      })],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-14T00:00:00Z', 'laptop');
+    const ingConflict = result.conflicts.find(c => c.entityType === 'recipeIngredient');
+    expect(ingConflict).toBeTruthy();
+    expect(ingConflict.parentId).toBe('r1');
+    expect(ingConflict.field).toBe('qty');
+    expect(ingConflict.localValue).toBe(200);
+    expect(ingConflict.remoteValue).toBe(300);
+  });
+
+  test('nested ingredient deleted one side, edited other → resurrected', () => {
+    const local = mkState({
+      recipes: [mkRecipe('r1', {
+        ingredients: [mkRow('ingId', 'i1', { qty: 500, _modifiedAt: '2026-04-15T10:00:00Z' })],
+      })],
+      auditLog: [],
+    });
+    const remote = mkState({
+      recipes: [mkRecipe('r1', { ingredients: [] })],
+      auditLog: [{
+        id: 'del-nested', ts: '2026-04-12T00:00:00Z', op: 'delete',
+        entityType: 'recipeIngredient', entityId: 'i1', parentId: 'r1', by: 'desktop',
+      }],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.recipes[0].ingredients).toHaveLength(1);
+    expect(result.restoreEntries.some(e => e.entityId === 'i1')).toBe(true);
+  });
+
+  test('subRecipe rows merge by recipeId', () => {
+    const local = mkState({
+      recipes: [mkRecipe('r1', { subRecipes: [mkRow('recipeId', 'sub1', { qty: 100 })] })],
+    });
+    const remote = mkState({
+      recipes: [mkRecipe('r1', { subRecipes: [mkRow('recipeId', 'sub2', { qty: 200 })] })],
+    });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    const ids = result.mergedState.recipes[0].subRecipes.map(r => r.recipeId).sort();
+    expect(ids).toEqual(['sub1', 'sub2']);
+  });
+
+  test('parent _modifiedAt bumped to max of parent + nested', () => {
+    const local = mkState({
+      recipes: [mkRecipe('r1', {
+        _modifiedAt: '2026-04-10T00:00:00Z',
+        ingredients: [mkRow('ingId', 'i1', { _modifiedAt: '2026-04-20T00:00:00Z' })],
+      })],
+    });
+    const remote = mkState({ recipes: [] });
+    const result = SyncEngine.mergeState(local, remote, '2026-04-09T00:00:00Z', 'laptop');
+    expect(result.mergedState.recipes[0]._modifiedAt).toBe('2026-04-20T00:00:00Z');
+  });
+});

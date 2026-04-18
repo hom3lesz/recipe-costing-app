@@ -164,6 +164,90 @@
     return merged;
   }
 
+  const NESTED_ARRAYS = [
+    { arrayKey: 'ingredients', idKey: 'ingId',    entityType: 'recipeIngredient' },
+    { arrayKey: 'subRecipes',  idKey: 'recipeId', entityType: 'subRecipe' },
+  ];
+
+  function _findNestedDeleteEntry(auditLog, entityType, entityId, parentId) {
+    if (!Array.isArray(auditLog)) return null;
+    let latest = null;
+    for (const e of auditLog) {
+      if (!e || e.op !== 'delete') continue;
+      if (e.entityType !== entityType || e.entityId !== entityId) continue;
+      if (e.parentId !== parentId) continue;
+      if (!latest || e.ts > latest.ts) latest = e;
+    }
+    return latest;
+  }
+
+  function _mergeNestedArray(
+    localArr, remoteArr, idKey, entityType, parentId,
+    mergedAuditLog, deviceName, restoreEntries, lastSyncAt, conflicts
+  ) {
+    const localById = new Map();
+    const remoteById = new Map();
+    for (const r of (localArr || [])) if (r && r[idKey]) localById.set(r[idKey], r);
+    for (const r of (remoteArr || [])) if (r && r[idKey]) remoteById.set(r[idKey], r);
+
+    const mergedById = new Map();
+    const allIds = new Set([...localById.keys(), ...remoteById.keys()]);
+
+    for (const id of allIds) {
+      const L = localById.get(id);
+      const R = remoteById.get(id);
+
+      if (L && !R) {
+        const del = _findNestedDeleteEntry(mergedAuditLog, entityType, id, parentId);
+        if (del) {
+          if (_modAt(L) > del.ts) {
+            mergedById.set(id, _deepClone(L));
+            restoreEntries.push({
+              id: _uuid(), ts: new Date().toISOString(), op: 'restore',
+              by: deviceName, entityType, entityId: id, parentId,
+              notes: 'resurrected after conflicting delete',
+              revertedEntryId: del.id,
+            });
+          }
+        } else {
+          mergedById.set(id, _deepClone(L));
+        }
+      } else if (!L && R) {
+        const del = _findNestedDeleteEntry(mergedAuditLog, entityType, id, parentId);
+        if (del) {
+          if (_modAt(R) > del.ts) {
+            mergedById.set(id, _deepClone(R));
+            restoreEntries.push({
+              id: _uuid(), ts: new Date().toISOString(), op: 'restore',
+              by: deviceName, entityType, entityId: id, parentId,
+              notes: 'resurrected after conflicting delete',
+              revertedEntryId: del.id,
+            });
+          }
+        } else {
+          mergedById.set(id, _deepClone(R));
+        }
+      } else if (L && R) {
+        mergedById.set(id, _mergeRecordCase2(
+          L, R, lastSyncAt, deviceName, conflicts, entityType, parentId
+        ));
+      }
+    }
+    return Array.from(mergedById.values());
+  }
+
+  function _bumpParentModAt(recipe) {
+    let max = recipe._modifiedAt || '';
+    for (const nested of NESTED_ARRAYS) {
+      const arr = recipe[nested.arrayKey] || [];
+      for (const row of arr) {
+        const rMod = row && row._modifiedAt;
+        if (rMod && rMod > max) max = rMod;
+      }
+    }
+    if (max) recipe._modifiedAt = max;
+  }
+
   function _valuesEqual(a, b) {
     if (a === b) return true;
     try {
@@ -213,6 +297,17 @@
         } else {
           mergedById.set(id, _deepClone(L));
         }
+        if (entityType === 'recipe' && mergedById.has(id)) {
+          const kept = mergedById.get(id);
+          for (const nested of NESTED_ARRAYS) {
+            kept[nested.arrayKey] = _mergeNestedArray(
+              kept[nested.arrayKey], [],
+              nested.idKey, nested.entityType, kept.id,
+              mergedAuditLog, deviceName, restoreEntries, lastSyncAt, conflicts
+            );
+          }
+          _bumpParentModAt(kept);
+        }
       } else if (!L && R) {
         // Case 1b: remote-only, mirror.
         const del = _findDeleteEntry(mergedAuditLog, entityType, id);
@@ -233,10 +328,30 @@
         } else {
           mergedById.set(id, _deepClone(R));
         }
+        if (entityType === 'recipe' && mergedById.has(id)) {
+          const kept = mergedById.get(id);
+          for (const nested of NESTED_ARRAYS) {
+            kept[nested.arrayKey] = _mergeNestedArray(
+              [], kept[nested.arrayKey],
+              nested.idKey, nested.entityType, kept.id,
+              mergedAuditLog, deviceName, restoreEntries, lastSyncAt, conflicts
+            );
+          }
+          _bumpParentModAt(kept);
+        }
       } else if (L && R) {
-        mergedById.set(id, _mergeRecordCase2(
-          L, R, lastSyncAt, deviceName, conflicts, entityType, null
-        ));
+        const merged = _mergeRecordCase2(L, R, lastSyncAt, deviceName, conflicts, entityType, null);
+        if (entityType === 'recipe') {
+          for (const nested of NESTED_ARRAYS) {
+            merged[nested.arrayKey] = _mergeNestedArray(
+              L[nested.arrayKey], R[nested.arrayKey],
+              nested.idKey, nested.entityType, merged.id,
+              mergedAuditLog, deviceName, restoreEntries, lastSyncAt, conflicts
+            );
+          }
+          _bumpParentModAt(merged);
+        }
+        mergedById.set(id, merged);
       }
     }
 
