@@ -14332,35 +14332,154 @@ async function runSyncNow() {
   if (!s.folder) { showToast('No sync folder selected', 'error'); return; }
   const statusEl = document.getElementById('sync-status');
   if (statusEl) statusEl.textContent = 'Syncing…';
+
   try {
-    const data = {
-      recipes: state.recipes,
-      ingredients: state.ingredients,
-      suppliers: state.suppliers,
-      settings: {
-        currency: state.currency,
-        activeGP: state.activeGP,
-        vatRate: state.vatRate,
-        recipeCategories: state.recipeCategories
-      },
-      auditLog: state.auditLog || [],
-      _schemaVersion: (window.Audit && window.Audit.SCHEMA_VERSION) || 2,
-      exportDate: new Date().toISOString(),
-      version: state.version || '0.0.12',
-      deviceName: _getDeviceName(),
-      dataTimestamp: state._lastEditTimestamp || new Date().toISOString()
-    };
-    const result = await window.electronAPI.syncBackupToFolder(s.folder, data, _getActiveLocationSlug());
-    if (result.error) {
-      showToast('Sync failed: ' + result.error, 'error', 4000);
-      if (statusEl) statusEl.textContent = 'Last sync failed: ' + result.error;
-    } else {
-      s.lastSync = new Date().toISOString();
-      _saveSyncSettings(s);
-      showToast('✓ Synced to cloud folder', 'success', 2500);
-      _renderSyncUI();
+    // 1. Pull remote (newest backup for this location).
+    const backups = await window.electronAPI.listSyncBackups(s.folder, _getActiveLocationSlug());
+    let remoteData = null;
+    let newestName = null;
+    let lastSeenRemoteTimestamp = s.lastSeenRemoteTimestamp || null;
+    if (backups && backups.length) {
+      newestName = backups[0].name;
+      const pull = await window.electronAPI.restoreSyncBackup(s.folder, newestName, _getActiveLocationSlug());
+      if (pull && !pull.error && pull.data) {
+        remoteData = pull.data;
+      }
     }
-  } catch(e) {
+
+    // 2. Schema version check.
+    if (remoteData) {
+      const schemaCheck = SyncEngine.checkSchemaVersion(
+        (window.Audit && window.Audit.SCHEMA_VERSION) || 2,
+        remoteData._schemaVersion
+      );
+      if (!schemaCheck.ok) {
+        showToast(schemaCheck.reason, 'error', 5000);
+        if (statusEl) statusEl.textContent = 'Sync aborted: version mismatch';
+        return;
+      }
+    }
+
+    // 3. Merge (or bootstrap from nothing).
+    let mergedState = null;
+    let newConflicts = [];
+    let restoreEntries = [];
+    if (remoteData) {
+      const localStateForMerge = {
+        recipes: state.recipes,
+        ingredients: state.ingredients,
+        suppliers: state.suppliers,
+        settings: {
+          currency: state.currency,
+          activeGP: state.activeGP,
+          vatRate: state.vatRate,
+          recipeCategories: state.recipeCategories,
+          _modifiedAt: state._settingsModifiedAt || state._lastEditTimestamp || '',
+          _modifiedBy: state._settingsModifiedBy || _getDeviceName(),
+        },
+        auditLog: state.auditLog || [],
+      };
+      const remoteStateForMerge = {
+        recipes: remoteData.recipes || [],
+        ingredients: remoteData.ingredients || [],
+        suppliers: remoteData.suppliers || [],
+        settings: Object.assign({}, remoteData.settings || {}),
+        auditLog: remoteData.auditLog || [],
+      };
+      const mergeResult = SyncEngine.mergeState(
+        localStateForMerge,
+        remoteStateForMerge,
+        s.lastSync || null,
+        _getDeviceName()
+      );
+      mergedState = mergeResult.mergedState;
+      newConflicts = mergeResult.conflicts;
+      restoreEntries = mergeResult.restoreEntries;
+
+      // 4. Apply merged state.
+      state.recipes = mergedState.recipes;
+      state.ingredients = mergedState.ingredients;
+      state.suppliers = mergedState.suppliers;
+      if (mergedState.settings) {
+        if (mergedState.settings.currency) state.currency = mergedState.settings.currency;
+        if (mergedState.settings.activeGP) state.activeGP = mergedState.settings.activeGP;
+        if (mergedState.settings.vatRate !== undefined) state.vatRate = mergedState.settings.vatRate;
+        if (mergedState.settings.recipeCategories) state.recipeCategories = mergedState.settings.recipeCategories;
+      }
+      state.auditLog = mergedState.auditLog;
+      if (restoreEntries.length && window.Audit && window.Audit.appendLogEntries) {
+        window.Audit.appendLogEntries(state, restoreEntries);
+      }
+
+      // 5. Persist locally. Refresh audit snapshot so save() doesn't double-log.
+      if (window.refreshAuditSnapshot) window.refreshAuditSnapshot();
+      await save();
+      if (window.refreshAuditSnapshot) window.refreshAuditSnapshot();
+
+      // 6. Reconcile queue + append new conflicts.
+      const existingQueue = _loadConflictQueue();
+      const reconciled = SyncEngine.reconcileConflictQueue(
+        existingQueue,
+        { recipes: state.recipes, ingredients: state.ingredients, suppliers: state.suppliers, settings: mergedState.settings },
+        remoteStateForMerge
+      );
+      const seen = new Set(reconciled.map(c => c.id));
+      for (const c of newConflicts) if (!seen.has(c.id)) reconciled.push(c);
+      _saveConflictQueue(reconciled);
+      lastSeenRemoteTimestamp = remoteData.dataTimestamp || lastSeenRemoteTimestamp;
+    }
+
+    // 7. Stale-check then push.
+    let staleAbort = false;
+    if (remoteData && newestName) {
+      const recheck = await window.electronAPI.listSyncBackups(s.folder, _getActiveLocationSlug());
+      if (recheck && recheck.length && recheck[0].name !== newestName) {
+        staleAbort = true;
+      }
+    }
+
+    if (!staleAbort) {
+      const data = {
+        recipes: state.recipes,
+        ingredients: state.ingredients,
+        suppliers: state.suppliers,
+        settings: {
+          currency: state.currency,
+          activeGP: state.activeGP,
+          vatRate: state.vatRate,
+          recipeCategories: state.recipeCategories
+        },
+        auditLog: state.auditLog || [],
+        _schemaVersion: (window.Audit && window.Audit.SCHEMA_VERSION) || 2,
+        exportDate: new Date().toISOString(),
+        version: state.version || '0.0.12',
+        deviceName: _getDeviceName(),
+        dataTimestamp: state._lastEditTimestamp || new Date().toISOString()
+      };
+      const result = await window.electronAPI.syncBackupToFolder(s.folder, data, _getActiveLocationSlug());
+      if (result.error) {
+        showToast('Sync failed: ' + result.error, 'error', 4000);
+        if (statusEl) statusEl.textContent = 'Last sync failed: ' + result.error;
+        return;
+      }
+      s.lastSync = new Date().toISOString();
+      s.lastSeenRemoteTimestamp = data.dataTimestamp;
+      _saveSyncSettings(s);
+    } else {
+      // Stale — don't push this round, but record that we merged.
+      s.lastSync = new Date().toISOString();
+      if (lastSeenRemoteTimestamp) s.lastSeenRemoteTimestamp = lastSeenRemoteTimestamp;
+      _saveSyncSettings(s);
+    }
+
+    const queue = _loadConflictQueue();
+    if (queue.length) {
+      _conflictSummaryToast(queue.length);
+    } else {
+      showToast('✓ Synced', 'success', 2500);
+    }
+    _renderSyncUI();
+  } catch (e) {
     showToast('Sync failed: ' + e.message, 'error', 4000);
     if (statusEl) statusEl.textContent = 'Sync error: ' + e.message;
   }
