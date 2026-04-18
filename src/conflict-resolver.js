@@ -187,11 +187,121 @@
     return String(v);
   }
 
+  function _escHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function _relativeTime(ts) {
+    if (typeof window !== 'undefined' && window.ActivityView && window.ActivityView.relativeTime) {
+      return window.ActivityView.relativeTime(ts);
+    }
+    return ts || '';
+  }
+
+  function _deviceLabel(name, currentDevice) {
+    if (!name) return 'Unknown device';
+    if (name === currentDevice) return 'This device';
+    return name;
+  }
+
+  function formatRow(conflict, state, currentDevice) {
+    var label = entityDisplayName(state, conflict);
+    var localBtn = formatValueForButton(conflict.localValue);
+    var remoteBtn = formatValueForButton(conflict.remoteValue);
+    var localDev = _deviceLabel(conflict.localModifiedBy, currentDevice);
+    var remoteDev = _deviceLabel(conflict.remoteModifiedBy, currentDevice);
+    var localWhen = _relativeTime(conflict.localModifiedAt);
+    var remoteWhen = _relativeTime(conflict.remoteModifiedAt);
+
+    var localTitle = typeof conflict.localValue === 'string' ? _escHtml(conflict.localValue) : _escHtml(JSON.stringify(conflict.localValue));
+    var remoteTitle = typeof conflict.remoteValue === 'string' ? _escHtml(conflict.remoteValue) : _escHtml(JSON.stringify(conflict.remoteValue));
+
+    return (
+      '<div class="conflict-row" data-conflict-id="' + _escHtml(conflict.id) + '" ' +
+      'style="padding:12px 16px;border-bottom:1px solid var(--border)">' +
+        '<div style="font-weight:600;margin-bottom:4px">' + _escHtml(label) + '</div>' +
+        '<div style="display:flex;gap:24px;font-size:11px;color:var(--text-muted);margin-bottom:8px">' +
+          '<div style="flex:1">' + _escHtml(localDev) + ' · ' + _escHtml(localWhen) + '</div>' +
+          '<div style="flex:1">' + _escHtml(remoteDev) + ' · ' + _escHtml(remoteWhen) + '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button class="btn-secondary btn-sm" style="flex:1;text-align:left" ' +
+            'title="' + localTitle + '" ' +
+            'onclick="ConflictResolver.resolveConflict(\'' + _escHtml(conflict.id) + '\',\'local\')">' +
+            'Keep ' + _escHtml(localBtn) +
+          '</button>' +
+          '<button class="btn-secondary btn-sm" style="flex:1;text-align:left" ' +
+            'title="' + remoteTitle + '" ' +
+            'onclick="ConflictResolver.resolveConflict(\'' + _escHtml(conflict.id) + '\',\'remote\')">' +
+            'Keep ' + _escHtml(remoteBtn) +
+          '</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderBadge() {
+    if (typeof document === 'undefined') return;
+    var badge = document.getElementById('conflict-badge');
+    if (!badge) return;
+    var queue = (typeof window !== 'undefined' && window._conflictQueue) || [];
+    var count = queue.length;
+    var countEl = document.getElementById('conflict-badge-count');
+    if (countEl) countEl.textContent = String(count);
+    if (count > 0) badge.classList.remove('hidden');
+    else badge.classList.add('hidden');
+  }
+
+  function render() {
+    if (typeof document === 'undefined') return;
+    var list = document.getElementById('conflict-resolver-list');
+    if (!list) return;
+    var state = (typeof window !== 'undefined' && window.state) || {};
+    var queue = (typeof window !== 'undefined' && window._conflictQueue) || [];
+    var currentDevice = (typeof window !== 'undefined' && window._getDeviceName && window._getDeviceName()) || '';
+
+    var title = document.getElementById('conflict-resolver-title');
+    if (title) title.textContent = 'Pending Conflicts (' + queue.length + ')';
+
+    if (queue.length === 0) {
+      list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">No conflicts pending ✓</div>';
+      return;
+    }
+    list.innerHTML = queue.map(function (c) { return formatRow(c, state, currentDevice); }).join('');
+  }
+
+  function openResolver() {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    var queue = window._conflictQueue || [];
+    var state = window.state || {};
+    var pruned = pruneMissingRecords(queue, state);
+    if (pruned.length !== queue.length && window._saveConflictQueue) {
+      window._saveConflictQueue(pruned);
+    }
+    var modal = document.getElementById('conflict-resolver-modal');
+    if (modal) modal.classList.remove('hidden');
+    render();
+    renderBadge();
+  }
+
+  function closeResolver() {
+    if (typeof document === 'undefined') return;
+    var modal = document.getElementById('conflict-resolver-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
   return {
     pruneMissingRecords: pruneMissingRecords,
     applyResolution: applyResolution,
     entityDisplayName: entityDisplayName,
     formatValueForButton: formatValueForButton,
     _findRecord: _findRecord,
+    formatRow: formatRow,
+    renderBadge: renderBadge,
+    render: render,
+    openResolver: openResolver,
+    closeResolver: closeResolver,
   };
 }));
