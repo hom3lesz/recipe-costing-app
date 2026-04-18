@@ -292,6 +292,50 @@
     if (modal) modal.classList.add('hidden');
   }
 
+  async function resolveConflict(conflictId, winner) {
+    if (typeof window === 'undefined') return;
+    var queue = (window._conflictQueue || []).slice();
+    var idx = queue.findIndex(function (c) { return c && c.id === conflictId; });
+    if (idx === -1) { render(); renderBadge(); return; }
+    var conflict = queue[idx];
+
+    var state = window.state;
+    var deviceName = (window._getDeviceName && window._getDeviceName()) || 'Unknown';
+
+    var result = applyResolution(state, conflict, winner, deviceName);
+    if (result.error === 'missing') {
+      queue.splice(idx, 1);
+      if (window._saveConflictQueue) window._saveConflictQueue(queue);
+      if (window.showToast) window.showToast('Record no longer exists — removed from queue', 'info', 3000);
+      render(); renderBadge();
+      return;
+    }
+
+    if (window.Audit && window.Audit.appendLogEntries) {
+      window.Audit.appendLogEntries(state, [result.auditEntry]);
+    } else if (state && Array.isArray(state.auditLog)) {
+      state.auditLog.push(result.auditEntry);
+    }
+
+    queue.splice(idx, 1);
+    if (window._saveConflictQueue) window._saveConflictQueue(queue);
+
+    try {
+      if (window.refreshAuditSnapshot) window.refreshAuditSnapshot();
+      if (window.save) await window.save();
+      if (window.refreshAuditSnapshot) window.refreshAuditSnapshot();
+    } catch (e) {
+      console.error('[ConflictResolver] save failed', e);
+    }
+
+    render(); renderBadge();
+
+    if (queue.length === 0) {
+      if (window.showToast) window.showToast('✓ All conflicts resolved', 'success', 2000);
+      setTimeout(closeResolver, 800);
+    }
+  }
+
   return {
     pruneMissingRecords: pruneMissingRecords,
     applyResolution: applyResolution,
@@ -303,5 +347,6 @@
     render: render,
     openResolver: openResolver,
     closeResolver: closeResolver,
+    resolveConflict: resolveConflict,
   };
 }));
