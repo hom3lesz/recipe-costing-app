@@ -16044,6 +16044,45 @@ function buildInvoicePrompt(categories) {
   );
 }
 
+/**
+ * Normalise AI-returned packSize + unit into a consistent base unit (g / ml / each).
+ * Handles cases where the model returns compound units like "x2.5kg", "x330ml",
+ * plain "kg", "ltr", etc. instead of pre-multiplied values.
+ *
+ * Examples:
+ *   packSize=4, unit="x2.5kg"  → packSize=10000, unit="g"
+ *   packSize=24, unit="x330ml" → packSize=7920,  unit="ml"
+ *   packSize=6,  unit="x1LTR"  → packSize=6000,  unit="ml"
+ *   packSize=2,  unit="kg"     → packSize=2000,   unit="g"
+ *   packSize=1.5,unit="kg"     → packSize=1500,   unit="g"
+ */
+function _normalisePackUnit(packSize, unit) {
+  var ps = parseFloat(packSize) || 0;
+  if (!unit || ps <= 0) return { packSize: ps, unit: unit || 'g' };
+  var u = String(unit).trim().toLowerCase().replace(/s$/, '');
+
+  // "xNunit" pattern: x2.5kg, x330ml, x1ltr, x342gm, x1LTR …
+  var xm = u.match(/^x\s*(\d+\.?\d*)\s*(kg|g|gm|ltr?|litre?|l|ml|m)$/);
+  if (xm) {
+    var inner = parseFloat(xm[1]);
+    var iu = xm[2];
+    var total = ps * inner;
+    if (iu === 'kg')                                   return { packSize: Math.round(total * 1000), unit: 'g' };
+    if (iu === 'ltr' || iu === 'litr' || iu === 'litre' || iu === 'l') return { packSize: Math.round(total * 1000), unit: 'ml' };
+    if (iu === 'g' || iu === 'gm')                    return { packSize: Math.round(total), unit: 'g' };
+    if (iu === 'ml' || iu === 'm')                    return { packSize: Math.round(total), unit: 'ml' };
+  }
+
+  // Simple unit conversions
+  if (u === 'kg')                                      return { packSize: Math.round(ps * 1000), unit: 'g' };
+  if (u === 'ltr' || u === 'litr' || u === 'litre' || u === 'l') return { packSize: Math.round(ps * 1000), unit: 'ml' };
+  if (u === 'g' || u === 'gm' || u === 'gram')        return { packSize: ps, unit: 'g' };
+  if (u === 'ml')                                      return { packSize: ps, unit: 'ml' };
+  if (u === 'each' || u === 'ea' || u === 'ptn' || u === 'pcs' || u === 'pc') return { packSize: Math.round(ps), unit: 'each' };
+
+  return { packSize: ps, unit: unit }; // unknown compound unit – pass through unchanged
+}
+
 async function startInvoiceScan() {
   const results = await browserIPC.openInvoice();
   if (!results || !results.length) return;
@@ -16245,6 +16284,9 @@ async function startInvoiceScan() {
       const suggestedCat =
         item.category && validCats.has(item.category) ? item.category : "";
 
+      // Normalise packSize + unit before anything else
+      const normPack = _normalisePackUnit(item.packSize, item.unit);
+
       // unitPrice = cost per case as invoiced (the Unit Price column)
       // deliveredQty = how many cases were delivered
       const unitPrice = item.unitPrice || item.packCost || 0;
@@ -16261,6 +16303,8 @@ async function startInvoiceScan() {
         lineTotal: lineTotal,
         caseQty: deliveredQty,
         packCost: packCost,
+        packSize: normPack.packSize,
+        unit: normPack.unit,
         matchedId: match ? match.id : null,
         selected: !!match,
         supplierId: modal.dataset.supplierId || null,
