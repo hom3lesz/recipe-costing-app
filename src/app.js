@@ -2775,20 +2775,6 @@ function searchScore(query, text) {
     return 200 + (200 - Math.min(t.length, 199));
   }
 
-  // 5. Fuzzy subsequence match — all query chars appear in order
-  //    e.g. "chkn" matches "chicken", "tmt" matches "tomato"
-  //    Only for queries ≥ 3 chars to avoid noise
-  if (q.length >= 3) {
-    let i = 0;
-    for (let j = 0; j < t.length && i < q.length; j++) {
-      if (t[j] === q[i]) i++;
-    }
-    if (i === q.length) {
-      // Shorter text wins; longer gap penalty implicit via length
-      return 100 + (100 - Math.min(t.length, 99));
-    }
-  }
-
   return 0;
 }
 
@@ -3067,21 +3053,6 @@ function highlightMatch(text, query) {
     }
   }
   if (ranges.length) return _applyHighlightRanges(t, ranges);
-
-  // Fuzzy subsequence highlight: mark each matching char
-  // Only if the full query (no spaces) has length ≥ 3 and all chars appear in order
-  const flat = q.replace(/\s+/g, "");
-  if (flat.length >= 3) {
-    const charRanges = [];
-    let i = 0;
-    for (let j = 0; j < t.length && i < flat.length; j++) {
-      if (tl[j] === flat[i]) {
-        charRanges.push([j, j + 1]);
-        i++;
-      }
-    }
-    if (i === flat.length) return _applyHighlightRanges(t, charRanges);
-  }
 
   return safe;
 }
