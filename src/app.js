@@ -15227,6 +15227,7 @@ async function startRecipeScan() {
 function _recipeScanMatchIngredients() {
   if (!_recipeScanData || !_recipeScanData.ingredients) return;
   _recipeScanData.ingredients.forEach(function (item) {
+    if (!item.name) return; // skip AI-returned items with no name
     // 1. Try the AI's libraryMatch suggestion
     if (item.libraryMatch) {
       const exact = state.ingredients.find(i => i.name.toLowerCase() === item.libraryMatch.toLowerCase());
@@ -16210,7 +16211,7 @@ async function startInvoiceScan() {
     const barEl = document.getElementById("inv-progress-bar");
     if (barEl) barEl.style.width = "100%";
     const validCats = new Set(getIngCategories());
-    invoiceResults = items.map(function (item) {
+    invoiceResults = items.filter(function (item) { return !!item.name; }).map(function (item) {
       const lower = item.name.toLowerCase();
 
       // 1. Use AI's libraryMatch suggestion first (exact name lookup)
