@@ -16755,7 +16755,8 @@ function applyInvoiceUpdates() {
               });
             }
             ing.packCost = newCost;
-            if (item.packSize) ing.packSize = item.packSize;
+            // Do NOT overwrite ing.packSize — invoice scans update price only.
+            // The user's pack-size definition is set in the ingredient library.
             if (supplierId && !ing.supplierId) ing.supplierId = supplierId;
           }
         } else if (item.setAsPrimary) {
@@ -16777,7 +16778,7 @@ function applyInvoiceUpdates() {
           }
           ing.supplierId = supplierId;
           ing.packCost = newCost;
-          if (item.packSize) ing.packSize = item.packSize;
+          // Do NOT overwrite ing.packSize — invoice scans update price only.
           logPriceChange(ing, oldCost, newCost, _invoiceDate, true);
           if (oldCost > 0 && newCost > 0 && newCost !== oldCost) {
             priceAlerts.push({
@@ -16799,7 +16800,7 @@ function applyInvoiceUpdates() {
             // Log alt price change for reporting
             var _oldAltCost = _existingAlt.packCost;
             _existingAlt.packCost = newCost;
-            if (item.packSize) _existingAlt.packSize = item.packSize;
+            // Do NOT overwrite packSize — invoice scans update price only.
             if (_oldAltCost > 0 && newCost > 0 && newCost !== _oldAltCost) {
               var _altSup = state.suppliers.find(function(s) { return s.id === supplierId; });
               priceAlerts.push({
