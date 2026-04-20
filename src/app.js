@@ -16129,13 +16129,18 @@ async function startInvoiceScan() {
       })
       .join("");
     const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-    const items = Array.isArray(parsed) ? parsed : parsed.items || [];
-    const invoiceHeader = Array.isArray(parsed)
+    // AI sometimes wraps the response in an array: [{invoiceNumber, items:[...]}]
+    // Unwrap to a consistent root object before extracting items/header.
+    const root = Array.isArray(parsed)
+      ? (parsed.length === 1 && parsed[0] && parsed[0].items ? parsed[0] : parsed)
+      : parsed;
+    const items = Array.isArray(root) ? root : root.items || [];
+    const invoiceHeader = Array.isArray(root)
       ? {}
       : {
-          invoiceNumber: parsed.invoiceNumber || "",
-          invoiceDate: parsed.invoiceDate || "",
-          invoiceTotal: parsed.invoiceTotal || 0,
+          invoiceNumber: root.invoiceNumber || "",
+          invoiceDate: root.invoiceDate || "",
+          invoiceTotal: root.invoiceTotal || 0,
         };
     const modal = document.getElementById("invoice-modal");
     modal.dataset.invoiceNumber = invoiceHeader.invoiceNumber;
