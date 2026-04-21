@@ -119,7 +119,7 @@ describe('formatEntry', () => {
       field: 'packCost', before: 0.85, after: 0.90,
     });
     expect(html).toContain('Updated');
-    expect(html).toContain('packCost');
+    expect(html).toContain('pack cost');
     expect(html).toContain('0.85');
     expect(html).toContain('0.9');
     expect(html).toContain('revert-btn');
@@ -170,7 +170,7 @@ describe('formatEntry on resolve-conflict', () => {
     expect(html).toContain('⚖');
     expect(html).toContain('Resolved conflict');
     expect(html).toContain('Cucumber');
-    expect(html).toContain('packCost');
+    expect(html).toContain('pack cost');
     expect(html).toContain('2.5');
     expect(html).toContain('2.75');
     expect(html).toMatch(/data-entry-id="log-1"/);

@@ -82,6 +82,65 @@
     return _escHtml(String(v));
   }
 
+  // Look up a supplier name from the global state (browser only; falls back to raw id in Jest).
+  function _lookupSupplierName(id) {
+    try {
+      if (!id) return '—';
+      if (typeof state === 'undefined' || !state.suppliers) return id;
+      var sup = state.suppliers.find(function (s) { return s.id === id; });
+      return sup ? sup.name : id;
+    } catch (e) { return id; }
+  }
+
+  // Prettier labels for common field names shown in the activity log.
+  var _FIELD_LABELS = {
+    supplierId:   'supplier',
+    altSuppliers: 'alt suppliers',
+    packCost:     'pack cost',
+    packSize:     'pack size',
+    yieldPct:     'yield %',
+    ingCategories:'ing categories',
+    recipeCategories: 'recipe categories',
+    priceOverride:'sell price',
+    foodCostTarget:'food cost target',
+    activeGP:     'target GP',
+    vatRate:      'VAT rate',
+    actualYield:  'actual yield',
+    priceHistory: 'price history',
+  };
+
+  function _friendlyFieldLabel(field) {
+    return _FIELD_LABELS[field] || field;
+  }
+
+  // Field-aware value formatter — resolves supplier IDs, formats arrays nicely.
+  // Falls through to _formatValue for all other fields.
+  function _formatFieldValue(field, v) {
+    if (v === null || v === undefined) return '<em>empty</em>';
+
+    if (field === 'supplierId') {
+      if (!v) return '<em>none</em>';
+      return _escHtml(_lookupSupplierName(v));
+    }
+
+    if (field === 'altSuppliers') {
+      if (!Array.isArray(v) || v.length === 0) return '<em>none</em>';
+      return v.map(function (alt) {
+        var name = _lookupSupplierName(alt.supplierId);
+        var parts = [_escHtml(name)];
+        if (alt.packCost != null) parts.push('£' + Number(alt.packCost).toFixed(2));
+        if (alt.packSize != null) parts.push(alt.packSize + ' units');
+        return parts.join(' · ');
+      }).join('<br>');
+    }
+
+    if (field === 'allergens' || field === 'tags') {
+      if (Array.isArray(v)) return v.length ? _escHtml(v.join(', ')) : '<em>none</em>';
+    }
+
+    return _formatValue(v);
+  }
+
   function formatEntry(entry) {
     var time = relativeTime(entry.ts);
     var device = _escHtml(entry.device || '');
@@ -96,11 +155,11 @@
     if (entry.op === 'create') {
       desc = 'Created ' + entityLabel + ' ' + name;
     } else if (entry.op === 'update') {
-      desc = 'Updated ' + name + ' <span style="color:var(--text-muted)">' + _escHtml(entry.field) + '</span>'
+      desc = 'Updated ' + name + ' <span style="color:var(--text-muted)">' + _escHtml(_friendlyFieldLabel(entry.field)) + '</span>'
         + '<div style="margin-top:4px;font-size:12px">'
-        + '<span style="text-decoration:line-through;color:var(--red)">' + _formatValue(entry.before) + '</span>'
+        + '<span style="text-decoration:line-through;color:var(--red)">' + _formatFieldValue(entry.field, entry.before) + '</span>'
         + ' &rarr; '
-        + '<span style="color:var(--green)">' + _formatValue(entry.after) + '</span>'
+        + '<span style="color:var(--green)">' + _formatFieldValue(entry.field, entry.after) + '</span>'
         + '</div>';
     } else if (entry.op === 'delete') {
       desc = 'Deleted ' + entityLabel + ' ' + name;
@@ -111,11 +170,11 @@
       }
     } else if (entry.op === 'resolve-conflict') {
       desc = '⚖ Resolved conflict on ' + entityLabel + ' <b>' + _escHtml(entry.entityName) + '</b> '
-        + '<span style="color:var(--text-muted)">' + _escHtml(entry.field) + '</span>'
+        + '<span style="color:var(--text-muted)">' + _escHtml(_friendlyFieldLabel(entry.field)) + '</span>'
         + '<div style="margin-top:4px;font-size:12px">'
-        + '<span style="text-decoration:line-through;color:var(--red)">' + _formatValue(entry.before) + '</span>'
+        + '<span style="text-decoration:line-through;color:var(--red)">' + _formatFieldValue(entry.field, entry.before) + '</span>'
         + ' &rarr; '
-        + '<span style="color:var(--green)">' + _formatValue(entry.after) + '</span>'
+        + '<span style="color:var(--green)">' + _formatFieldValue(entry.field, entry.after) + '</span>'
         + '</div>';
     } else if (entry.op === 'bulk-update') {
       desc = 'Bulk updated ' + entityLabel + ' — ' + name;
@@ -346,10 +405,10 @@
 
     if (entry.op === 'update' || entry.op === 'resolve-conflict') {
       titleEl.textContent = 'Revert Update';
-      html += '<div style="font-size:13px;margin-bottom:12px">Revert <strong>' + entityLabel + '</strong> field <code>' + _escHtml(entry.field) + '</code>:</div>';
+      html += '<div style="font-size:13px;margin-bottom:12px">Revert <strong>' + entityLabel + '</strong> field <code>' + _escHtml(_friendlyFieldLabel(entry.field)) + '</code>:</div>';
       html += '<div style="padding:10px 14px;background:var(--bg-card2);border:1px solid var(--border);border-radius:6px;margin-bottom:12px">'
-        + '<div style="margin-bottom:6px"><span style="text-decoration:line-through;color:var(--red)">' + _formatValue(staleness.currentValue) + '</span></div>'
-        + '<div>&rarr; <span style="color:var(--green);font-weight:600">' + _formatValue(staleness.revertValue) + '</span></div>'
+        + '<div style="margin-bottom:6px"><span style="text-decoration:line-through;color:var(--red)">' + _formatFieldValue(entry.field, staleness.currentValue) + '</span></div>'
+        + '<div>&rarr; <span style="color:var(--green);font-weight:600">' + _formatFieldValue(entry.field, staleness.revertValue) + '</span></div>'
         + '</div>';
     } else if (entry.op === 'delete') {
       titleEl.textContent = 'Restore Deleted Record';
@@ -359,8 +418,8 @@
     if (staleness.stale) {
       html += '<div style="padding:10px 14px;background:rgba(255,180,0,0.1);border:1px solid rgba(255,180,0,0.3);border-radius:6px;margin-bottom:12px;font-size:12px">'
         + '<strong style="color:var(--orange)">&#9888; Warning:</strong> This field has been changed since this log entry. '
-        + 'Current value is <strong>' + _formatValue(staleness.currentValue) + '</strong>. '
-        + 'Reverting will overwrite it with <strong>' + _formatValue(staleness.revertValue) + '</strong>.'
+        + 'Current value is <strong>' + _formatFieldValue(entry.field, staleness.currentValue) + '</strong>. '
+        + 'Reverting will overwrite it with <strong>' + _formatFieldValue(entry.field, staleness.revertValue) + '</strong>.'
         + '</div>';
     }
 
