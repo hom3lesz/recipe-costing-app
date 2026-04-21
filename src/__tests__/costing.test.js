@@ -412,4 +412,69 @@ describe('printRecipeCard nutrition uses recipeNutritionTotal', () => {
     expect(total.kcal).toBeCloseTo(200, 0);
     expect(total.protein).toBeCloseTo(2, 1);
   });
+
+  test('recipeNutritionTotal combines direct ingredients and sub-recipes', () => {
+    const subRecipe = {
+      id: 'sub2',
+      name: 'Sauce',
+      portions: 1,
+      yieldQty: null,
+      ingredients: [],
+      subRecipes: [],
+    };
+    const subIng = {
+      id: 'i2', name: 'Cream', packSize: 100, packCost: 1,
+      unit: 'ml', yieldPct: 100,
+      nutrition: { kcal: 100, protein: 1, fat: 9, carbs: 2 },
+    };
+    subRecipe.ingredients = [{ ingId: 'i2', qty: 100, recipeUnit: 'ml' }];
+
+    const directIng = {
+      id: 'i3', name: 'Pasta', packSize: 100, packCost: 1,
+      unit: 'g', yieldPct: 100,
+      nutrition: { kcal: 150, protein: 5, fat: 1, carbs: 30 },
+    };
+
+    const mainRecipe = {
+      id: 'main2',
+      name: 'Pasta with Sauce',
+      portions: 1,
+      yieldQty: null,
+      ingredients: [{ ingId: 'i3', qty: 100, recipeUnit: 'g' }],
+      subRecipes: [{ recipeId: 'sub2', qty: 1 }],
+    };
+
+    state.ingredients = [subIng, directIng];
+    state.recipes = [subRecipe, mainRecipe];
+    invalidateMaps();
+
+    const total = recipeNutritionTotal(mainRecipe);
+    expect(total.kcal).toBeCloseTo(250, 0); // 100 + 150
+    expect(total.protein).toBeCloseTo(6, 1); // 1 + 5
+  });
+
+  test('recipeNutritionTotal handles direct-ingredient-only recipes correctly', () => {
+    const ing = {
+      id: 'i4', name: 'Chicken', packSize: 100, packCost: 2,
+      unit: 'g', yieldPct: 100,
+      nutrition: { kcal: 165, protein: 31, fat: 3.6, carbs: 0 },
+    };
+
+    const recipe = {
+      id: 'main3',
+      name: 'Plain Chicken',
+      portions: 1,
+      yieldQty: null,
+      ingredients: [{ ingId: 'i4', qty: 100, recipeUnit: 'g' }],
+      subRecipes: [],
+    };
+
+    state.ingredients = [ing];
+    state.recipes = [recipe];
+    invalidateMaps();
+
+    const total = recipeNutritionTotal(recipe);
+    expect(total.kcal).toBeCloseTo(165, 0);
+    expect(total.protein).toBeCloseTo(31, 0);
+  });
 });
