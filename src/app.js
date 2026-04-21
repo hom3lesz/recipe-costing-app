@@ -4772,6 +4772,29 @@ function renderLocationTabs() {
 function switchLocation(locationId) {
   if (locationId === state.activeLocationId) return;
   loadLocationData(locationId);
+
+  // Close the location manager modal if it was used to trigger the switch
+  closeLocationManager();
+
+  // Clear search/filter state from the previous location so the new
+  // location's data isn't filtered through the old search terms.
+  const rlSearch = document.getElementById("rl-search");
+  if (rlSearch) rlSearch.value = "";
+  const ingSearch = document.getElementById("ing-search");
+  if (ingSearch) ingSearch.value = "";
+  const supSearch = document.getElementById("supplier-search");
+  if (supSearch) supSearch.value = "";
+  try { sessionStorage.removeItem("rc-search-q-rl"); } catch {}
+  try { sessionStorage.removeItem("rc-search-q-ing"); } catch {}
+  try { sessionStorage.removeItem("rc-search-q-sup"); } catch {}
+  const rlCat = document.getElementById("rl-cat");
+  if (rlCat) rlCat.value = "";
+  const rlGp = document.getElementById("rl-gp");
+  if (rlGp) rlGp.value = "";
+  const rlSup = document.getElementById("rl-supplier");
+  if (rlSup) rlSup.value = "";
+  _rlTagFilters.clear();
+
   save();
   renderLocationTabs();
   renderLocationTabBar();
