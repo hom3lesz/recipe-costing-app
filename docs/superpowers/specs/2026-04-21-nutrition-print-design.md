@@ -4,7 +4,7 @@
 
 **Architecture:** Two independent changes in `src/app.js` — a one-line bug fix in `printRecipeCard`, and a checkbox + rendering addition in the Menu Print flow.
 
-**Tech Stack:** Vanilla JS, existing `recipeNutritionTotal()` function, existing nutrition grid HTML pattern from recipe card print.
+**Tech Stack:** Vanilla JS, existing `recipeNutritionTotal()` function, existing horizontal nutrition bar HTML pattern from recipe card print.
 
 ---
 
@@ -46,21 +46,23 @@ The Menu Print modal (the options dialog shown before printing) gets a new check
 - Not persisted between sessions
 
 **Per-card nutrition panel**
-When the checkbox is ticked, each recipe card in the printed menu renders a small nutrition grid immediately after the allergen/tag row:
+When the checkbox is ticked, each recipe card in the printed menu renders a horizontal nutrition bar immediately after the allergens line, matching the style already used in `printRecipeCard`:
 
 ```
-┌─────────────────────────────────┐
-│  450 kcal  │  28g protein       │
-│  12g fat   │  38g carbs         │
-│        per portion              │
-└─────────────────────────────────┘
+NUTRITION PER PORTION
+┌──────────┬──────────┬──────────┬──────────┐
+│ 487kcal  │  38.2g   │  22.1g   │  31.4g   │
+│ CALORIES │ PROTEIN  │   FAT    │  CARBS   │
+└──────────┴──────────┴──────────┴──────────┘
 ```
 
-- Layout: 2×2 grid of `kcal / protein / fat / carbs`, "per portion" label underneath — matching the style already used in `printRecipeCard`.
+- A "NUTRITION PER PORTION" section label sits above the bar (matching the recipe card's "NUTRITION PER PORTION" heading style).
+- Four equal columns: `{kcal}kcal / CALORIES`, `{protein}g / PROTEIN`, `{fat}g / FAT`, `{carbs}g / CARBS`.
 - Computed via `recipeNutritionTotal(recipe)` so sub-recipes are included.
-- Only rendered when the recipe has at least one nutrition value (kcal > 0). Recipes without nutrition data silently omit the panel — no blank box, no placeholder text.
+- Only rendered when `kcal > 0`. Recipes without nutrition data silently omit the panel — no blank box, no placeholder text.
 
 ### Acceptance criteria
 - Unchecked (default): menu prints exactly as before — no nutrition shown.
-- Checked: recipes with nutrition data show the 2×2 panel; recipes without it show nothing extra.
+- Checked: recipes with nutrition data show the horizontal bar; recipes without it show nothing extra.
 - Sub-recipe-based recipes show correct totals (not zeros).
+- The nutrition bar style is visually consistent with the existing recipe card print style.
