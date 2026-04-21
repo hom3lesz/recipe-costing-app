@@ -19222,7 +19222,7 @@ async function printRecipeCard(id) {
   const vatRate = state.vatRate || 0;
   const gp = sellPrice > 0 ? ((sellPrice - cpp) / sellPrice) * 100 : 0;
   const allergens = recipeAllergens(recipe);
-  const nutrition = recipeNutrition(recipe);
+  const nutrition = recipeNutritionTotal(recipe);
   const cur = state.currency || "£";
   const methods = recipe.methods || [];
   const dateStr = new Date().toLocaleDateString("en-GB", {

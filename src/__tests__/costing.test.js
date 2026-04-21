@@ -109,6 +109,96 @@ async function hashPin(pin) {
   return 'sha2_' + Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// ─── Nutrition test support (mirrors app.js) ────────────────────────────────
+let state = { ingredients: [], recipes: [], suppliers: [] };
+let _ingMap = null;
+let _recipeMap = null;
+
+function getIngMap() {
+  if (!_ingMap) _ingMap = new Map((state.ingredients || []).map(i => [i.id, i]));
+  return _ingMap;
+}
+
+function getRecipeMap() {
+  if (!_recipeMap) _recipeMap = new Map((state.recipes || []).map(r => [r.id, r]));
+  return _recipeMap;
+}
+
+function invalidateMaps() {
+  _ingMap = null;
+  _recipeMap = null;
+}
+
+function ingQtyInGrams(qty, unit) {
+  if (unit === 'g') return qty;
+  if (unit === 'kg') return qty * 1000;
+  if (unit === 'ml') return qty;
+  if (unit === 'l') return qty * 1000;
+  if (unit === 'oz') return qty * 28.3495;
+  if (unit === 'lb') return qty * 453.592;
+  if (unit === 'fl_oz') return qty * 29.5735;
+  return null;
+}
+
+function convertQtyToBase(qty, from, to) {
+  const grams = ingQtyInGrams(qty, from);
+  if (grams === null) return null;
+  if (to === 'g') return grams;
+  if (to === 'kg') return grams / 1000;
+  if (to === 'ml') return grams;
+  if (to === 'l') return grams / 1000;
+  if (to === 'oz') return grams / 28.3495;
+  if (to === 'lb') return grams / 453.592;
+  if (to === 'fl_oz') return grams / 29.5735;
+  return null;
+}
+
+function recipeNutritionTotal(recipe, _visited) {
+  if (!recipe) return null;
+  _visited = _visited || new Set();
+  if (_visited.has(recipe.id)) return null;
+  _visited.add(recipe.id);
+  const nutr = { kcal: 0, protein: 0, fat: 0, carbs: 0, fibre: 0, salt: 0 };
+  let hasData = false;
+  let partial = false;
+  for (const ri of recipe.ingredients || []) {
+    const ing = getIngMap().get(ri.ingId);
+    if (!ing) continue;
+    if (!ing.nutrition) { partial = true; continue; }
+    let qty = ri.qty;
+    const rUnit = ri.recipeUnit || ing.unit;
+    if (rUnit !== ing.unit) qty = convertQtyToBase(ri.qty, rUnit, ing.unit);
+    const grams = ingQtyInGrams(qty, ing.unit);
+    if (grams === null) { partial = true; continue; }
+    const f = grams / 100;
+    hasData = true;
+    nutr.kcal    += (ing.nutrition.kcal    || 0) * f;
+    nutr.protein += (ing.nutrition.protein || 0) * f;
+    nutr.fat     += (ing.nutrition.fat     || 0) * f;
+    nutr.carbs   += (ing.nutrition.carbs   || 0) * f;
+    nutr.fibre   += (ing.nutrition.fibre   || 0) * f;
+    nutr.salt    += (ing.nutrition.salt    || 0) * f;
+  }
+  for (const sr of recipe.subRecipes || []) {
+    const sub = getRecipeMap().get(sr.recipeId);
+    if (!sub) continue;
+    const subTotal = recipeNutritionTotal(sub, new Set(_visited));
+    if (!subTotal) { partial = true; continue; }
+    if (subTotal.partial) partial = true;
+    hasData = true;
+    const divisor = sub.yieldQty || sub.portions || 1;
+    const f = (sr.qty || 1) / divisor;
+    nutr.kcal    += subTotal.kcal    * f;
+    nutr.protein += subTotal.protein * f;
+    nutr.fat     += subTotal.fat     * f;
+    nutr.carbs   += subTotal.carbs   * f;
+    nutr.fibre   += subTotal.fibre   * f;
+    nutr.salt    += subTotal.salt    * f;
+  }
+  if (!hasData) return null;
+  return { ...nutr, partial };
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('detectAllergens', () => {
@@ -281,5 +371,45 @@ describe('hashPin', () => {
     const bare = await globalThis.crypto.subtle.digest('SHA-256', enc.encode('1234'));
     const bareHex = 'sha2_' + Array.from(new Uint8Array(bare)).map(b => b.toString(16).padStart(2, '0')).join('');
     expect(withPrefix).not.toBe(bareHex);
+  });
+});
+
+describe('printRecipeCard nutrition uses recipeNutritionTotal', () => {
+  test('recipeNutritionTotal includes sub-recipe nutrition', () => {
+    // Sub-recipe: 1 portion yields 1, has known nutrition
+    const subRecipe = {
+      id: 'sub1',
+      name: 'Sauce',
+      portions: 1,
+      yieldQty: null,
+      ingredients: [],
+      subRecipes: [],
+    };
+    // Ingredient with nutrition
+    const ing = {
+      id: 'i1', name: 'Cream', packSize: 100, packCost: 1,
+      unit: 'ml', yieldPct: 100,
+      nutrition: { kcal: 200, protein: 2, fat: 18, carbs: 3 },
+    };
+    subRecipe.ingredients = [{ ingId: 'i1', qty: 100, recipeUnit: 'ml' }];
+
+    // Main recipe uses only the sub-recipe (no direct ingredients)
+    const mainRecipe = {
+      id: 'main1',
+      name: 'Pasta',
+      portions: 1,
+      yieldQty: null,
+      ingredients: [],
+      subRecipes: [{ recipeId: 'sub1', qty: 1 }],
+    };
+
+    // Wire up the maps that recipeNutritionTotal() uses
+    state.ingredients = [ing];
+    state.recipes = [subRecipe, mainRecipe];
+    invalidateMaps();
+
+    const total = recipeNutritionTotal(mainRecipe);
+    expect(total.kcal).toBeCloseTo(200, 0);
+    expect(total.protein).toBeCloseTo(2, 1);
   });
 });
