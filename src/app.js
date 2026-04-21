@@ -17887,6 +17887,7 @@ function renderMenuPrintPreview() {
   const showGP = document.getElementById("mp-show-gp")?.checked === true;
   const groupByCat = document.getElementById("mp-group-cat")?.checked !== false;
   const showAllergens = document.getElementById("mp-show-allergens")?.checked !== false;
+  const showNutrition = document.getElementById("mp-show-nutrition")?.checked === true;
   const cur = state.currency || "£";
   const vatRate = state.vatRate || 0;
 
@@ -17944,6 +17945,29 @@ function renderMenuPrintPreview() {
         `<span style="font-weight:700">Allergens:</span> ${escHtml(allergens.join(', '))}</div>`
       : "";
 
+    let nutritionHtml = "";
+    if (showNutrition) {
+      const n = recipeNutritionTotal(r);
+      if (n && n.kcal > 0) {
+        nutritionHtml =
+          `<div style="margin-top:6px">` +
+          `<div style="font-size:8px;font-weight:700;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Nutrition per portion</div>` +
+          `<div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:12px">` +
+          [
+            ["Calories", Math.round(n.kcal) + "kcal"],
+            ["Protein",  n.protein.toFixed(1) + "g"],
+            ["Fat",      n.fat.toFixed(1) + "g"],
+            ["Carbs",    n.carbs.toFixed(1) + "g"],
+          ].map(([l, v]) =>
+            `<div style="flex:1;text-align:center;padding:8px 4px;border-right:1px solid var(--border)">` +
+            `<div style="font-size:14px;font-weight:700;color:var(--text-primary)">${v}</div>` +
+            `<div style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">${l}</div>` +
+            `</div>`
+          ).join("") +
+          `</div></div>`;
+      }
+    }
+
     const notesHtml = r.notes
       ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.5;` +
         `overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-style:italic">` +
@@ -17971,6 +17995,7 @@ function renderMenuPrintPreview() {
         ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:1px">${tagsHtml}</div>`
         : "") +
       allergensHtml +
+      nutritionHtml +
       `</div>`
     );
   }
@@ -18039,6 +18064,7 @@ async function printMenuCard() {
   const showGP = document.getElementById("mp-show-gp")?.checked === true;
   const groupByCat = document.getElementById("mp-group-cat")?.checked !== false;
   const showAllergens = document.getElementById("mp-show-allergens")?.checked !== false;
+  const showNutrition = document.getElementById("mp-show-nutrition")?.checked === true;
   const menuTitle =
     (document.getElementById("mp-menu-title")?.value || "").trim() || "Our Menu";
   const cur = state.currency || "£";
@@ -18090,6 +18116,29 @@ async function printMenuCard() {
       ? `<div style="font-size:9px;color:#c00;margin-top:2px"><b>Allergens:</b> ${escHtml(allergens.join(', '))}</div>`
       : "";
 
+    let nutritionLine = "";
+    if (showNutrition) {
+      const n = recipeNutritionTotal(r);
+      if (n && n.kcal > 0) {
+        nutritionLine =
+          `<div style="margin-top:6px">` +
+          `<div style="font-size:8px;font-weight:700;letter-spacing:.08em;color:#888;text-transform:uppercase;margin-bottom:3px">Nutrition per portion</div>` +
+          `<div style="display:flex;gap:0;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;font-size:12px">` +
+          [
+            ["Calories", Math.round(n.kcal) + "kcal"],
+            ["Protein",  n.protein.toFixed(1) + "g"],
+            ["Fat",      n.fat.toFixed(1) + "g"],
+            ["Carbs",    n.carbs.toFixed(1) + "g"],
+          ].map(([l, v]) =>
+            `<div style="flex:1;text-align:center;padding:8px 4px;border-right:1px solid #e0e0e0">` +
+            `<div style="font-size:14px;font-weight:700;color:#111">${v}</div>` +
+            `<div style="color:#999;font-size:10px;text-transform:uppercase;letter-spacing:.5px">${l}</div>` +
+            `</div>`
+          ).join("") +
+          `</div></div>`;
+      }
+    }
+
     return (
       `<div class="dish">` +
       `<div class="dish-header">` +
@@ -18108,6 +18157,7 @@ async function printMenuCard() {
           `</div>`
         : "") +
       allergensLine +
+      nutritionLine +
       `</div>`
     );
   }
