@@ -17949,15 +17949,16 @@ function renderMenuPrintPreview() {
     if (showNutrition) {
       const n = recipeNutritionTotal(r);
       if (n && n.kcal > 0) {
+        const portions = r.portions || 1;
         nutritionHtml =
           `<div style="margin-top:6px">` +
           `<div style="font-size:8px;font-weight:700;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">Nutrition per portion</div>` +
           `<div style="display:flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:12px">` +
           [
-            ["Calories", Math.round(n.kcal) + "kcal"],
-            ["Protein",  n.protein.toFixed(1) + "g"],
-            ["Fat",      n.fat.toFixed(1) + "g"],
-            ["Carbs",    n.carbs.toFixed(1) + "g"],
+            ["Calories", Math.round(n.kcal / portions) + "kcal"],
+            ["Protein",  (n.protein / portions).toFixed(1) + "g"],
+            ["Fat",      (n.fat / portions).toFixed(1) + "g"],
+            ["Carbs",    (n.carbs / portions).toFixed(1) + "g"],
           ].map(([l, v]) =>
             `<div style="flex:1;text-align:center;padding:8px 4px;border-right:1px solid var(--border)">` +
             `<div style="font-size:14px;font-weight:700;color:var(--text-primary)">${v}</div>` +
@@ -18120,15 +18121,16 @@ async function printMenuCard() {
     if (showNutrition) {
       const n = recipeNutritionTotal(r);
       if (n && n.kcal > 0) {
+        const portions = r.portions || 1;
         nutritionLine =
           `<div style="margin-top:6px">` +
           `<div style="font-size:8px;font-weight:700;letter-spacing:.08em;color:#888;text-transform:uppercase;margin-bottom:3px">Nutrition per portion</div>` +
           `<div style="display:flex;gap:0;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;font-size:12px">` +
           [
-            ["Calories", Math.round(n.kcal) + "kcal"],
-            ["Protein",  n.protein.toFixed(1) + "g"],
-            ["Fat",      n.fat.toFixed(1) + "g"],
-            ["Carbs",    n.carbs.toFixed(1) + "g"],
+            ["Calories", Math.round(n.kcal / portions) + "kcal"],
+            ["Protein",  (n.protein / portions).toFixed(1) + "g"],
+            ["Fat",      (n.fat / portions).toFixed(1) + "g"],
+            ["Carbs",    (n.carbs / portions).toFixed(1) + "g"],
           ].map(([l, v]) =>
             `<div style="flex:1;text-align:center;padding:8px 4px;border-right:1px solid #e0e0e0">` +
             `<div style="font-size:14px;font-weight:700;color:#111">${v}</div>` +
