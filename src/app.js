@@ -3717,7 +3717,7 @@ function showView(view) {
       const currentRlCat = rlCat.value;
       const regCatsRl = getRecipeCategories();
       const usedCatsRl = [
-        ...new Set(state.recipes.filter((r) => !r.yieldQty).map((r) => r.category).filter(Boolean)),
+        ...new Set(state.recipes.map((r) => r.category).filter(Boolean)),
       ];
       const allRlCats = [...new Set([...regCatsRl, ...usedCatsRl])];
       const rlTotal = state.recipes.filter((r) => !r.yieldQty).length;
@@ -3726,9 +3726,7 @@ function showView(view) {
         allRlCats
           .map((c) => {
             const cnt = state.recipes.filter(
-              (r) =>
-                !r.yieldQty &&
-                (r.category || "").toLowerCase() === c.toLowerCase(),
+              (r) => (r.category || "").toLowerCase() === c.toLowerCase(),
             ).length;
             return cnt > 0 ? `<option value="${escHtml(c)}">${escHtml(c)} (${cnt})</option>` : "";
           })
@@ -3927,7 +3925,7 @@ function renderRecipeList() {
     const savedVal = rlCatEl.value;
     const regC = getRecipeCategories();
     const usedC = [
-      ...new Set(state.recipes.filter((r) => !r.yieldQty).map((r) => r.category).filter(Boolean)),
+      ...new Set(state.recipes.map((r) => r.category).filter(Boolean)),
     ];
     const allC = [...new Set([...regC, ...usedC])];
     const tot = state.recipes.filter((r) => !r.yieldQty).length;
@@ -3936,9 +3934,7 @@ function renderRecipeList() {
       allC
         .map((c) => {
           const cnt = state.recipes.filter(
-            (r) =>
-              !r.yieldQty &&
-              (r.category || "").toLowerCase() === c.toLowerCase(),
+            (r) => (r.category || "").toLowerCase() === c.toLowerCase(),
           ).length;
           return cnt > 0 ? `<option value="${escHtml(c)}">${escHtml(c)} (${cnt})</option>` : "";
         })
