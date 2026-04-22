@@ -3820,7 +3820,7 @@ function _recBuildItem(item) {
       </td>
       <td class="rl-dot-cell"><span class="rl-dot" style="background:${dotCol}"></span></td>
       <td class="rl-name-cell">
-        <div class="rl-name">${highlightMatch(r.name, _hlQ)}${lockIcon}${r.pricedFlag ? ' <span style="font-size:9px;font-weight:700;color:var(--green);background:rgba(76,175,125,0.12);border:1px solid rgba(76,175,125,0.3);border-radius:3px;padding:1px 5px;vertical-align:middle">✓ PRICED</span>' : ""}${staleBadge}</div>
+        <div class="rl-name">${highlightMatch(r.name, _hlQ)}${lockIcon}${r.yieldQty ? ' <span style="font-size:9px;font-weight:700;color:#fff;background:#555;border-radius:3px;padding:1px 5px;vertical-align:middle">SUB</span>' : ""}${r.pricedFlag ? ' <span style="font-size:9px;font-weight:700;color:var(--green);background:rgba(76,175,125,0.12);border:1px solid rgba(76,175,125,0.3);border-radius:3px;padding:1px 5px;vertical-align:middle">✓ PRICED</span>' : ""}${staleBadge}</div>
         <div class="rl-sub">${r.ingredients.length} ingredient${r.ingredients.length !== 1 ? "s" : ""}${(r.methods || []).length ? " · " + r.methods.length + " steps" : ""}${timeInfo ? " · " + timeInfo : ""}${r.tags?.length ? " · " + r.tags.map((t) => "#" + t).join(" ") : ""}${r.lastEdited ? " · edited " + timeAgo(r.lastEdited) : ""}</div>
       </td>
       <td class="rl-portions-cell">${r.portions || 1}</td>
@@ -3954,7 +3954,11 @@ function renderRecipeList() {
   const target = getFoodCostTarget();
 
   const supplierFilter = document.getElementById("rl-supplier")?.value || "";
-  let recipes = state.recipes.filter((r) => !r.yieldQty);
+  // When a category filter is active that contains sub-recipe items (yieldQty),
+  // include those items too so they're visible. Otherwise only show regular recipes.
+  const hasCatWithSubRecipes = catFilter &&
+    state.recipes.some((r) => r.yieldQty && (r.category || "").toLowerCase() === catFilter.toLowerCase());
+  let recipes = state.recipes.filter((r) => !r.yieldQty || hasCatWithSubRecipes);
   if (searchVal) {
     // Smart search: fuzzy + multi-word + ranked + field prefixes (cat:, #tag, >price)
     recipes = searchItems(searchVal, recipes, [
