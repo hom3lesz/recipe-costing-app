@@ -3730,7 +3730,7 @@ function showView(view) {
                 !r.yieldQty &&
                 (r.category || "").toLowerCase() === c.toLowerCase(),
             ).length;
-            return `<option value="${escHtml(c)}">${escHtml(c)} (${cnt})</option>`;
+            return cnt > 0 ? `<option value="${escHtml(c)}">${escHtml(c)} (${cnt})</option>` : "";
           })
           .join("");
       rlCat.value = currentRlCat;
@@ -3940,7 +3940,7 @@ function renderRecipeList() {
               !r.yieldQty &&
               (r.category || "").toLowerCase() === c.toLowerCase(),
           ).length;
-          return `<option value="${escHtml(c)}">${escHtml(c)} (${cnt})</option>`;
+          return cnt > 0 ? `<option value="${escHtml(c)}">${escHtml(c)} (${cnt})</option>` : "";
         })
         .join("");
     rlCatEl.value = savedVal;
