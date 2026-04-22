@@ -3717,7 +3717,7 @@ function showView(view) {
       const currentRlCat = rlCat.value;
       const regCatsRl = getRecipeCategories();
       const usedCatsRl = [
-        ...new Set(state.recipes.map((r) => r.category).filter(Boolean)),
+        ...new Set(state.recipes.filter((r) => !r.yieldQty).map((r) => r.category).filter(Boolean)),
       ];
       const allRlCats = [...new Set([...regCatsRl, ...usedCatsRl])];
       const rlTotal = state.recipes.filter((r) => !r.yieldQty).length;
@@ -3927,7 +3927,7 @@ function renderRecipeList() {
     const savedVal = rlCatEl.value;
     const regC = getRecipeCategories();
     const usedC = [
-      ...new Set(state.recipes.map((r) => r.category).filter(Boolean)),
+      ...new Set(state.recipes.filter((r) => !r.yieldQty).map((r) => r.category).filter(Boolean)),
     ];
     const allC = [...new Set([...regC, ...usedC])];
     const tot = state.recipes.filter((r) => !r.yieldQty).length;
@@ -4799,6 +4799,9 @@ function switchLocation(locationId) {
   renderLocationTabs();
   renderLocationTabBar();
   showView("recipes");
+  // Always re-render the recipe list so the new location's data is visible
+  // even when the new location has an activeRecipeId (showView skips showRecipeList in that case)
+  renderRecipeList();
   renderSidebarRecipes();
   if (state.activeRecipeId) renderRecipeEditor();
   else
