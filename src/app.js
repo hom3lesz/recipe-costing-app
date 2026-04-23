@@ -13899,6 +13899,7 @@ const AI_MODELS = [
     label: "Gemini 2.5 Flash-Lite",
     keyHint: "Google key",
   },
+  { id: "ollama", label: "Ollama (Local)", keyHint: "model name" },
 ];
 
 function getAiEnabled() {
@@ -13908,10 +13909,11 @@ function getAiEnabled() {
         "claude",
         "gemini-flash",
         "gemini-flash-lite",
+        "ollama",
       ]
     );
   } catch (e) {
-    return ["claude", "gemini-flash", "gemini-flash-lite"];
+    return ["claude", "gemini-flash", "gemini-flash-lite", "ollama"];
   }
 }
 
@@ -13962,9 +13964,13 @@ function updateNutrModelUI() {
   if (!statusEl) return;
   const hasKey = !!getAiKey(model);
   const isGemini = model.startsWith("gemini");
+  const isOllama = model === "ollama";
   statusEl.innerHTML = hasKey
-    ? '<span style="color:var(--green);font-weight:700">✓ Key ready</span>'
-    : `<span style="color:var(--red)">No key — add ${isGemini ? "Gemini" : "Claude"} key in Settings</span>`;
+    ? '<span style="color:var(--green);font-weight:700">✓ ' + (isOllama ? "Model ready" : "Key ready") + '</span>'
+    : `<span style="color:var(--red)">` +
+      (isOllama ? "No model — add model name in Settings → AI Models" :
+       `No key — add ${isGemini ? "Gemini" : "Claude"} key in Settings`) +
+      `</span>`;
 }
 function getActiveModel() {
   // Check persisted selection first
@@ -14011,6 +14017,43 @@ async function clearAiKey(modelId) {
   updateInvoiceModelUI();
   updateNutrModelUI();
 }
+async function saveOllamaModel() {
+  const input = document.getElementById("ai-key-ollama");
+  const name = input ? input.value.trim() : "";
+  if (!name) { showToast("Enter a model name first", "error", 2000); return; }
+  _apiKeys["ollama"] = name;
+  await window.electronAPI.saveApiKey("ollama", name);
+  showToast("✓ Ollama model saved", "success", 1500);
+  renderSettingsPage();
+  rebuildModelDropdown();
+}
+async function testOllamaConnection() {
+  const input = document.getElementById("ai-key-ollama");
+  const modelName = (input ? input.value.trim() : "") || getAiKey("ollama");
+  const statusEl = document.getElementById("ai-key-status-ollama");
+  if (!statusEl) return;
+  statusEl.innerHTML = '<span style="color:var(--text-muted)">Testing…</span>';
+  try {
+    const res = await fetch("http://localhost:11434/api/tags");
+    if (!res.ok) throw new Error("not running");
+    const data = await res.json();
+    const models = (data.models || []).map((m) => m.name);
+    if (!modelName) {
+      statusEl.innerHTML = '<span style="color:var(--text-muted)">Ollama running — enter a model name above</span>';
+      return;
+    }
+    const found = models.some(
+      (m) => m === modelName || m.startsWith(modelName + ":") || m === modelName + ":latest"
+    );
+    if (found) {
+      statusEl.innerHTML = '<span style="color:var(--green);font-weight:700">🟢 Connected — ' + modelName + ' ready</span>';
+    } else {
+      statusEl.innerHTML = '<span style="color:var(--yellow,#f59e0b);font-weight:700">🟡 Ollama running but model not found — run: ollama pull ' + modelName + '</span>';
+    }
+  } catch {
+    statusEl.innerHTML = '<span style="color:var(--red);font-weight:700">🔴 Ollama not running — start it with: ollama serve</span>';
+  }
+}
 function clearInvoiceKey() {
   const model = document.getElementById("inv-model")?.value || "claude";
   clearAiKey(model);
@@ -14040,6 +14083,7 @@ function _populateModelSelect(sel, storageKey, onChangeFn) {
     claude: "Claude Sonnet",
     "gemini-flash": "Gemini 2.5 Flash",
     "gemini-flash-lite": "Gemini 2.5 Flash-Lite",
+    ollama: "Ollama (Local)",
   };
   const current = sel.value;
   sel.innerHTML = "";
@@ -14732,6 +14776,16 @@ function renderSettingsPage() {
         : '<span style="color:var(--text-muted)">No key</span>';
     }
   });
+  // Ollama: show model name and custom status (not a secret key)
+  const ollamaInput = document.getElementById("ai-key-ollama");
+  if (ollamaInput) ollamaInput.value = getAiKey("ollama");
+  const ollamaStatus = document.getElementById("ai-key-status-ollama");
+  if (ollamaStatus) {
+    const modelName = getAiKey("ollama");
+    ollamaStatus.innerHTML = modelName
+      ? '<span style="color:var(--green);font-weight:700">✓ ' + modelName + '</span>'
+      : '<span style="color:var(--text-muted)">No model configured</span>';
+  }
   // USDA key
   const usdaKeySettingsEl = document.getElementById("usda-key-input-settings");
   if (usdaKeySettingsEl) usdaKeySettingsEl.value = getAiKey("usda");
@@ -15954,12 +16008,15 @@ function updateInvoiceModelUI() {
   if (!statusEl) return;
   const hasKey = !!getAiKey(model);
   const isGemini = model === "gemini-flash" || model === "gemini-flash-lite";
+  const isOllama = model === "ollama";
   if (hasKey) {
-    statusEl.innerHTML =
-      '<span style="color:var(--green);font-size:11px">✓ Key set</span>';
+    statusEl.innerHTML = isOllama
+      ? '<span style="color:var(--green);font-size:11px">✓ Model set (vision features use cloud fallback)</span>'
+      : '<span style="color:var(--green);font-size:11px">✓ Key set</span>';
   } else {
-    statusEl.innerHTML =
-      '<span style="color:var(--red);font-size:11px">✗ No key — go to Settings to add</span>';
+    statusEl.innerHTML = isOllama
+      ? '<span style="color:var(--text-muted);font-size:11px">No model — add in Settings → AI Models</span>'
+      : '<span style="color:var(--red);font-size:11px">✗ No key — go to Settings to add</span>';
   }
 }
 

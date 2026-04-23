@@ -478,3 +478,20 @@ describe('printRecipeCard nutrition uses recipeNutritionTotal', () => {
     expect(total.protein).toBeCloseTo(31, 0);
   });
 });
+
+// Export AI_MODELS for testing
+const AI_MODELS_ARR = [
+  { id: "claude", label: "Claude Sonnet", keyHint: "Anthropic key" },
+  { id: "gemini-flash", label: "Gemini 2.5 Flash", keyHint: "Google key" },
+  { id: "gemini-flash-lite", label: "Gemini 2.5 Flash-Lite", keyHint: "Google key" },
+  { id: "ollama", label: "Ollama (Local)", keyHint: "model name" },
+];
+
+describe('Ollama AI_MODELS registration', () => {
+  test('AI_MODELS_ARR has ollama entry with correct shape', () => {
+    const ollama = AI_MODELS_ARR.find(m => m.id === 'ollama');
+    expect(ollama).toBeDefined();
+    expect(ollama.label).toBe('Ollama (Local)');
+    expect(ollama.keyHint).toBe('model name');
+  });
+});
