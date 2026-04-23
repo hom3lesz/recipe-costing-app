@@ -14022,7 +14022,12 @@ async function saveOllamaModel() {
   const name = input ? input.value.trim() : "";
   if (!name) { showToast("Enter a model name first", "error", 2000); return; }
   _apiKeys["ollama"] = name;
-  await window.electronAPI.saveApiKey("ollama", name);
+  try {
+    await window.electronAPI.saveApiKey("ollama", name);
+  } catch (e) {
+    showToast("Failed to save model — " + e.message, "error", 3000);
+    return;
+  }
   showToast("✓ Ollama model saved", "success", 1500);
   renderSettingsPage();
   rebuildModelDropdown();
@@ -14043,12 +14048,12 @@ async function testOllamaConnection() {
       return;
     }
     const found = models.some(
-      (m) => m === modelName || m.startsWith(modelName + ":") || m === modelName + ":latest"
+      (m) => m === modelName || m.startsWith(modelName + ":")
     );
     if (found) {
-      statusEl.innerHTML = '<span style="color:var(--green);font-weight:700">🟢 Connected — ' + modelName + ' ready</span>';
+      statusEl.innerHTML = '<span style="color:var(--green);font-weight:700">🟢 Connected — ' + escHtml(modelName) + ' ready</span>';
     } else {
-      statusEl.innerHTML = '<span style="color:var(--yellow,#f59e0b);font-weight:700">🟡 Ollama running but model not found — run: ollama pull ' + modelName + '</span>';
+      statusEl.innerHTML = '<span style="color:var(--yellow,#f59e0b);font-weight:700">🟡 Ollama running but model not found — run: ollama pull ' + escHtml(modelName) + '</span>';
     }
   } catch {
     statusEl.innerHTML = '<span style="color:var(--red);font-weight:700">🔴 Ollama not running — start it with: ollama serve</span>';
@@ -14764,6 +14769,7 @@ function renderSettingsPage() {
   // AI models
   const enabled = getAiEnabled();
   AI_MODELS.forEach(function (m) {
+    if (m.id === "ollama") return; // handled separately below
     const cb = document.getElementById("ai-enable-" + m.id);
     if (cb) cb.checked = enabled.includes(m.id);
     const ki = document.getElementById("ai-key-" + m.id);
@@ -14783,7 +14789,7 @@ function renderSettingsPage() {
   if (ollamaStatus) {
     const modelName = getAiKey("ollama");
     ollamaStatus.innerHTML = modelName
-      ? '<span style="color:var(--green);font-weight:700">✓ ' + modelName + '</span>'
+      ? '<span style="color:var(--green);font-weight:700">✓ ' + escHtml(modelName) + '</span>'
       : '<span style="color:var(--text-muted)">No model configured</span>';
   }
   // USDA key

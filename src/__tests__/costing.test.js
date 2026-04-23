@@ -480,6 +480,8 @@ describe('printRecipeCard nutrition uses recipeNutritionTotal', () => {
 });
 
 // Export AI_MODELS for testing
+// Local mirror of AI_MODELS from app.js — tests shape/intent, not the live array
+// (app.js is not importable in Jest due to Electron globals)
 const AI_MODELS_ARR = [
   { id: "claude", label: "Claude Sonnet", keyHint: "Anthropic key" },
   { id: "gemini-flash", label: "Gemini 2.5 Flash", keyHint: "Google key" },
