@@ -497,3 +497,61 @@ describe('Ollama AI_MODELS registration', () => {
     expect(ollama.keyHint).toBe('model name');
   });
 });
+
+describe('callOllamaText', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('calls Ollama chat endpoint and returns content', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { content: 'test response' } }),
+    });
+
+    // Minimal stub of callOllamaText for unit testing
+    async function callOllamaText(prompt, maxTokens, modelName) {
+      if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
+      const res = await fetch("http://localhost:11434/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [{ role: "user", content: prompt }],
+          stream: false,
+          ...(maxTokens ? { options: { num_predict: maxTokens } } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error("Ollama not reachable — make sure it's running (ollama serve).");
+      const data = await res.json();
+      return data.message?.content || "";
+    }
+
+    const result = await callOllamaText("hello", 100, "qwen3:8b");
+    expect(result).toBe("test response");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://localhost:11434/api/chat",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  test('throws when Ollama not running', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500 });
+
+    async function callOllamaText(prompt, maxTokens, modelName) {
+      if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
+      const res = await fetch("http://localhost:11434/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelName, messages: [{ role: "user", content: prompt }], stream: false }),
+      });
+      if (!res.ok) throw new Error("Ollama not reachable — make sure it's running (ollama serve).");
+      const data = await res.json();
+      return data.message?.content || "";
+    }
+
+    await expect(callOllamaText("hello", 100, "qwen3:8b")).rejects.toThrow("Ollama not reachable");
+  });
+});

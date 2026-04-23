@@ -16047,17 +16047,34 @@ function getInvoiceKey() {
 // ─── Text-only AI helper — proxied through main process ───────────────────────
 async function callGeminiText(prompt, maxTokens) {
   const model = getActiveModel();
-  const key = getActiveKey();
-  if (!key)
-    throw new Error(
-      "No API key found for " + model + ". Add it in Settings → AI Models.",
-    );
-  const text = await window.electronAPI.callAi(
-    model,
-    prompt,
-    key,
-    maxTokens || 1000,
-  );
+  return callAiText(prompt, model, maxTokens);
+}
+
+// ─── Ollama local AI ──────────────────────────────────────────────────────────
+async function callOllamaText(prompt, maxTokens) {
+  const modelName = getAiKey("ollama");
+  if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
+  const res = await fetch("http://localhost:11434/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [{ role: "user", content: prompt }],
+      stream: false,
+      ...(maxTokens ? { options: { num_predict: maxTokens } } : {}),
+    }),
+  });
+  if (!res.ok) throw new Error("Ollama not reachable — make sure it's running (ollama serve).");
+  const data = await res.json();
+  return (data.message?.content || "").replace(/```json|```/g, "").trim();
+}
+
+// ─── Unified AI text dispatcher ───────────────────────────────────────────────
+async function callAiText(prompt, model, maxTokens) {
+  if (model === "ollama") return callOllamaText(prompt, maxTokens);
+  const key = getAiKey(model);
+  if (!key) throw new Error("No API key for " + model + ". Add it in Settings → AI Models.");
+  const text = await window.electronAPI.callAi(model, prompt, key, maxTokens || 1000);
   return text.replace(/```json|```/g, "").trim();
 }
 
