@@ -505,31 +505,32 @@ describe('callOllamaText', () => {
     global.fetch = originalFetch;
   });
 
+  // Local stub mirroring app.js callOllamaText logic.
+  // app.js cannot be imported in Jest (Electron globals), so we test the contract here.
+  async function callOllamaTextStub(prompt, maxTokens, modelName) {
+    if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
+    const res = await fetch("http://localhost:11434/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: modelName,
+        messages: [{ role: "user", content: prompt }],
+        stream: false,
+        ...(maxTokens ? { options: { num_predict: maxTokens } } : {}),
+      }),
+    });
+    if (!res.ok) throw new Error("Ollama not reachable — make sure it's running (ollama serve).");
+    const data = await res.json();
+    return (data.message?.content || "").replace(/```json|```/g, "").trim();
+  }
+
   test('calls Ollama chat endpoint and returns content', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ message: { content: 'test response' } }),
     });
 
-    // Minimal stub of callOllamaText for unit testing
-    async function callOllamaText(prompt, maxTokens, modelName) {
-      if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
-      const res = await fetch("http://localhost:11434/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: modelName,
-          messages: [{ role: "user", content: prompt }],
-          stream: false,
-          ...(maxTokens ? { options: { num_predict: maxTokens } } : {}),
-        }),
-      });
-      if (!res.ok) throw new Error("Ollama not reachable — make sure it's running (ollama serve).");
-      const data = await res.json();
-      return data.message?.content || "";
-    }
-
-    const result = await callOllamaText("hello", 100, "qwen3:8b");
+    const result = await callOllamaTextStub("hello", 100, "qwen3:8b");
     expect(result).toBe("test response");
     expect(global.fetch).toHaveBeenCalledWith(
       "http://localhost:11434/api/chat",
@@ -537,21 +538,23 @@ describe('callOllamaText', () => {
     );
   });
 
+  test('strips markdown code fences from response', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { content: '```json\n{"name":"test"}\n```' } }),
+    });
+
+    const result = await callOllamaTextStub("parse this", 200, "qwen3:8b");
+    expect(result).toBe('{"name":"test"}');
+  });
+
   test('throws when Ollama not running', async () => {
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500 });
 
-    async function callOllamaText(prompt, maxTokens, modelName) {
-      if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
-      const res = await fetch("http://localhost:11434/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: modelName, messages: [{ role: "user", content: prompt }], stream: false }),
-      });
-      if (!res.ok) throw new Error("Ollama not reachable — make sure it's running (ollama serve).");
-      const data = await res.json();
-      return data.message?.content || "";
-    }
+    await expect(callOllamaTextStub("hello", 100, "qwen3:8b")).rejects.toThrow("Ollama not reachable");
+  });
 
-    await expect(callOllamaText("hello", 100, "qwen3:8b")).rejects.toThrow("Ollama not reachable");
+  test('throws when no model configured', async () => {
+    await expect(callOllamaTextStub("hello", 100, "")).rejects.toThrow("No Ollama model configured");
   });
 });
