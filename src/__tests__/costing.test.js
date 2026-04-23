@@ -505,8 +505,9 @@ describe('callOllamaText', () => {
     global.fetch = originalFetch;
   });
 
-  // Local stub mirroring app.js callOllamaText logic.
+  // Local stub mirroring app.js callOllamaText logic (app.js ~line 16054).
   // app.js cannot be imported in Jest (Electron globals), so we test the contract here.
+  // If the production function changes, update this stub to match.
   async function callOllamaTextStub(prompt, maxTokens, modelName) {
     if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
     const res = await fetch("http://localhost:11434/api/chat", {
