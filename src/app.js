@@ -7271,9 +7271,14 @@ function openRecipeImport() {
 }
 
 async function runRecipeImport() {
-  const key = getAiKey("gemini-flash") || getAiKey("gemini-flash-lite") || "";
-  if (!key) {
-    showToast("Add your Google API key in Settings first", "error", 3000);
+  const model = getActiveModel();
+  const key = getAiKey(model);
+  if (!key && model !== "ollama") {
+    showToast("Add an AI key in Settings → AI Models", "error", 3000);
+    return;
+  }
+  if (model === "ollama" && !key) {
+    showToast("Configure Ollama model name in Settings → AI Models", "error", 3000);
     return;
   }
 
@@ -7322,7 +7327,7 @@ ${url ? "URL: " + url : "Recipe text:\n" + text}
 Return ONLY valid JSON, no markdown, no explanation.`;
 
   try {
-    const raw = await callGeminiText(prompt);
+    const raw = await callAiText(prompt, model);
     const recipe = JSON.parse(raw);
     renderImportPreview(recipe);
   } catch (e) {
@@ -18547,7 +18552,7 @@ async function _runAiNutrScan(ings) {
         `- salt = sodium × 2.5 (UK convention)\n- Use typical raw values unless name implies cooked\n` +
         `- Round to 1 decimal place\n- If completely unknown, omit that ingredient\n\nIngredients:\n` +
         ingList;
-      const resultText = await window.electronAPI.callAi(model, prompt, apiKey, 4000);
+      const resultText = await callAiText(prompt, model, 4000);
       const batchMap = _parseAiNutrJson(resultText);
       Object.assign(allAiMap, batchMap);
     }
@@ -20537,9 +20542,10 @@ function printAllergenSheet() {
 async function checkCompetitorPrice(recipeId) {
   const recipe = state.recipes.find((r) => r.id === recipeId);
   if (!recipe) return;
-  const key = getAiKey("gemini-flash") || getAiKey("gemini-flash-lite") || "";
+  const model = getActiveModel();
+  const key = getAiKey(model);
   if (!key) {
-    showToast("Add your Google API key in Settings first", "error", 3000);
+    showToast("Add an AI key in Settings → AI Models", "error", 3000);
     return;
   }
 
@@ -20551,12 +20557,13 @@ async function checkCompetitorPrice(recipeId) {
   showToast("Checking market rates…", "success", 2000);
 
   try {
-    const raw = await callGeminiText(
+    const raw = await callAiText(
       `What is the typical restaurant menu price range (inclusive of VAT at 20%) for "${recipe.name}" ` +
         `(category: ${recipe.category || "main course"}) in the UK in 2025? ` +
         `Give me: low end price, mid range price, high end price (all inc VAT as shown on a menu), ` +
         `and a one-sentence note on what drives the variation. ` +
         `Reply ONLY with JSON: {"low":0,"mid":0,"high":0,"note":""}`,
+      model,
     );
     const result = JSON.parse(raw);
 
@@ -22599,11 +22606,8 @@ async function generateAIMethod() {
   applyBtn.classList.add("hidden");
 
   try {
-    const key = getActiveKey();
     const model = getActiveModel();
-    if (!key) throw new Error("No AI key set — add it in Settings → AI Models");
-
-    const rawText = await window.electronAPI.callAi(model, prompt, key, 1000);
+    const rawText = await callAiText(prompt, model, 1000);
     const steps = JSON.parse(rawText.replace(/```json|```/g, "").trim());
 
     if (!Array.isArray(steps) || !steps.length)
