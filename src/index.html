@@ -742,6 +742,22 @@
             </div>
           </div>
 
+          <!-- Ollama (Local) -->
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+            <input type="checkbox" id="ai-enable-ollama" onchange="saveAiSettings()" style="width:16px;height:16px;flex-shrink:0;cursor:pointer">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:700">Ollama (Local)</div>
+              <div style="font-size:11px;color:var(--text-muted)">Local · Free · No internet required · ollama.com</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              <span id="ai-key-status-ollama" style="font-size:12px"></span>
+              <input type="text" id="ai-key-ollama" placeholder="e.g. qwen3:30b" style="width:160px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:monospace;font-size:11px;padding:5px 8px;border-radius:4px;outline:none">
+              <button class="btn-secondary btn-sm" onclick="saveOllamaModel()">💾 Save</button>
+              <button class="btn-secondary btn-sm" onclick="testOllamaConnection()">🔌 Test</button>
+              <button class="btn-secondary btn-sm" onclick="clearAiKey('ollama')" style="color:var(--red)">🗑</button>
+            </div>
+          </div>
+
         </div>
         <p style="font-size:11px;color:var(--text-muted);margin-top:12px">☑ Checked models appear in the scanner dropdown. Uncheck to hide ones you don't use.</p>
       </div>
