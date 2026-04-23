@@ -1981,6 +1981,14 @@ async function init() {
       8000,
     );
   }
+  if (saved && saved._recoveredFrom) {
+    const shortPath = saved._recoveredFrom.split(/[\\/]/).slice(-1)[0];
+    showToast(
+      `⚠ Encrypted data could not be read — loaded from backup file "${shortPath}" instead. Some recent data may be missing. Go to Settings → Backup & Restore to check your backups.`,
+      "error",
+      12000,
+    );
+  }
   if (saved && !saved._loadError) {
     state = { ...state, ...saved };
     // Migrations

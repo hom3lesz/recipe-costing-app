@@ -93,7 +93,21 @@ function getOrCreateDataKey() {
   const kp = getDataKeyPath();
   if (fs.existsSync(kp)) {
     const stored = fs.readFileSync(kp);
-    return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(stored) : stored.toString('hex');
+    if (safeStorage.isEncryptionAvailable()) {
+      try {
+        return safeStorage.decryptString(stored);
+      } catch (e) {
+        // DPAPI can fail on Azure AD accounts after token/credential changes.
+        // Fall back to treating the raw bytes as a hex key (handles cases where
+        // the key was originally stored without DPAPI, e.g. isEncryptionAvailable
+        // was false at creation time).
+        console.warn('[getOrCreateDataKey] safeStorage.decryptString failed, trying raw fallback:', e.message);
+        const raw = stored.toString('hex');
+        if (raw.length === 64) return raw; // valid 32-byte hex key
+        throw e; // re-throw if it doesn't look like a raw key
+      }
+    }
+    return stored.toString('hex');
   }
   // First run — generate a new 32-byte key
   const rawKey = crypto.randomBytes(32).toString('hex');
@@ -140,6 +154,21 @@ ipcMain.handle('load-data', () => {
       return JSON.parse(decryptData(raw));
     } catch (e) {
       console.error('[load-data] decrypt failed:', e.message);
+      // Before giving up, check for plaintext fallback files left from migration
+      const fallbackPaths = [
+        path.join(app.getPath('userData'), 'recipe-data.json.migrated'),
+        path.join(app.getPath('userData'), 'recipe-data.json.old'),
+        path.join(app.getPath('userData'), 'recipe-data.json'),
+      ];
+      for (const fp of fallbackPaths) {
+        if (fs.existsSync(fp)) {
+          try {
+            const parsed = JSON.parse(fs.readFileSync(fp, 'utf8'));
+            console.log('[load-data] recovered from plaintext fallback:', fp);
+            return { ...parsed, _recoveredFrom: fp, _decryptError: e.message };
+          } catch (_) {}
+        }
+      }
       return { _loadError: 'DECRYPT_FAILED', message: e.message };
     }
   }
