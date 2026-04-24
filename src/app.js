@@ -1479,15 +1479,10 @@ async function aiAutoImportSheet() {
   const btn = document.getElementById("sheet-import-ai-btn");
   const preview = document.getElementById("sheet-import-preview");
 
-  let model, key;
+  let model;
   try {
     model = getActiveModel();
-    key = getActiveKey();
   } catch (e) { /* fall through */ }
-  if (!key) {
-    showToast("No AI key configured — add one in Settings → AI Models", "error", 4000);
-    return;
-  }
 
   if (btn) {
     btn.disabled = true;
@@ -1543,7 +1538,7 @@ async function aiAutoImportSheet() {
     'SPREADSHEET DATA:\n' + tableText;
 
   try {
-    const raw = await window.electronAPI.callAi(model, prompt, key, 8000);
+    const raw = await callAiText(prompt, model, 8000);
     const cleaned = String(raw || "").replace(/```json|```/g, "").trim();
 
     // Accept either a flat JSON array or a combined {suppliers, ingredients} object.
@@ -18533,7 +18528,6 @@ async function _runAiNutrScan(ings) {
   const sub = document.getElementById("nutr-progress-sub");
   if (bar) bar.style.width = "5%";
   const model = getNutrModel();
-  const apiKey = getAiKey(model);
   const BATCH = 25;
   const allAiMap = {};
   try {
@@ -18795,8 +18789,7 @@ function arResetToIdle() {
 
 async function runAiAllergenReview() {
   const model = getActiveModel();
-  const apiKey = getAiKey(model);
-  if (!apiKey) {
+  if (!getAiKey(model) && model !== "ollama") {
     document.getElementById("ar-ai-no-key").style.display = "block";
     return;
   }
@@ -18842,12 +18835,7 @@ ${ingList}`;
     if (txt)
       txt.textContent = "AI is reviewing " + ings.length + " ingredients…";
 
-    const resultText = await window.electronAPI.callAi(
-      model,
-      prompt,
-      apiKey,
-      8000,
-    );
+    const resultText = await callAiText(prompt, model, 8000);
 
     if (bar) bar.style.width = "90%";
     if (txt) txt.textContent = "Processing results…";
@@ -20544,8 +20532,12 @@ async function checkCompetitorPrice(recipeId) {
   if (!recipe) return;
   const model = getActiveModel();
   const key = getAiKey(model);
-  if (!key) {
+  if (!key && model !== "ollama") {
     showToast("Add an AI key in Settings → AI Models", "error", 3000);
+    return;
+  }
+  if (model === "ollama" && !key) {
+    showToast("Configure Ollama model name in Settings → AI Models", "error", 3000);
     return;
   }
 
