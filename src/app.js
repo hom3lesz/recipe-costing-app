@@ -16053,7 +16053,10 @@ async function callOllamaText(prompt, maxTokens) {
   const modelName = getAiKey("ollama");
   if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
   const content = await window.electronAPI.callOllama(modelName, prompt, maxTokens);
-  return (content || "").replace(/```json|```/g, "").trim();
+  return (content || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "") // strip Qwen3/DeepSeek thinking blocks
+    .replace(/```json\s*|```\s*/g, "")         // strip markdown fences
+    .trim();
 }
 
 // ─── Unified AI text dispatcher ───────────────────────────────────────────────
@@ -18507,8 +18510,11 @@ async function _runUsdaScan(ings) {
 }
 
 function _parseAiNutrJson(raw) {
-  // Strip markdown fences and leading/trailing whitespace
-  let s = raw.replace(/```json|```/g, "").trim();
+  // Strip thinking tokens, markdown fences, and whitespace
+  let s = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/```json\s*|```\s*/g, "")
+    .trim();
   // Extract outermost {...}
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
@@ -18517,10 +18523,15 @@ function _parseAiNutrJson(raw) {
   try {
     return JSON.parse(s);
   } catch {
-    // Truncated response — trim to last complete entry ending with `}`
-    const lastGood = s.lastIndexOf("},");
-    if (lastGood === -1) throw new Error("AI returned malformed JSON");
-    return JSON.parse(s.slice(0, lastGood + 1) + "}");
+    // Local models sometimes use single-quoted property names — try to fix
+    try {
+      return JSON.parse(s.replace(/'([^']*)'\s*:/g, '"$1":'));
+    } catch {
+      // Truncated response — trim to last complete entry ending with `}`
+      const lastGood = s.lastIndexOf("},");
+      if (lastGood === -1) throw new Error("AI returned malformed JSON");
+      return JSON.parse(s.slice(0, lastGood + 1) + "}");
+    }
   }
 }
 

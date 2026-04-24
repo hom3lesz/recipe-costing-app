@@ -665,6 +665,7 @@ ipcMain.handle('call-ollama', async (_, { modelName, prompt, maxTokens }) => {
     model: modelName.trim(),
     messages: [{ role: 'user', content: prompt }],
     stream: false,
+    think: false,  // disable Qwen3 thinking tokens (ignored by other models)
     ...(tokens ? { options: { num_predict: tokens } } : {}),
   });
   const result = await httpPost('127.0.0.1', 11434, '/api/chat', body);
