@@ -22613,8 +22613,9 @@ async function generateAIMethod() {
 
   try {
     const model = getActiveModel();
-    // 2000 tokens: prompt uses ~400-500 tokens, leaving room for 4-8 full steps
-    const rawText = await callAiText(prompt, model, 2000, true);
+    // jsonMode OFF: format:json causes the model to cram all steps into one entry.
+    // The prompt already specifies the exact JSON array format — text mode works better.
+    const rawText = await callAiText(prompt, model, 2000, false);
     let parsed;
     try {
       parsed = JSON.parse(rawText.replace(/```json|```/g, "").trim());
