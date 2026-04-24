@@ -22614,14 +22614,29 @@ async function generateAIMethod() {
   try {
     const model = getActiveModel();
     const rawText = await callAiText(prompt, model, 1000, true);
-    const parsed = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+    } catch (jsonErr) {
+      throw new Error("JSON parse failed: " + jsonErr.message + " | raw: " + rawText.slice(0, 200));
+    }
     // Ollama's format:json may wrap the array in an object {"steps":[...]}
-    const steps = Array.isArray(parsed)
-      ? parsed
-      : Object.values(parsed).find((v) => Array.isArray(v));
+    // or use {"1":"step","2":"step"} — try all strategies
+    let steps;
+    if (Array.isArray(parsed)) {
+      steps = parsed;
+    } else if (parsed && typeof parsed === "object") {
+      // Look for first array value
+      steps = Object.values(parsed).find((v) => Array.isArray(v));
+      if (!steps) {
+        // Try to reconstruct from {"1":"step","2":"step"} or {"step1":"..."}
+        const vals = Object.values(parsed).filter((v) => typeof v === "string" && v.trim());
+        if (vals.length) steps = vals.map((v) => ({ step: v }));
+      }
+    }
 
     if (!steps || !steps.length)
-      throw new Error("No steps returned");
+      throw new Error("No steps returned | raw: " + rawText.slice(0, 300));
     window._aiGeneratedSteps = steps;
     statusEl.innerHTML =
       '<span style="color:var(--green)">✓ Generated ' +
