@@ -22614,9 +22614,13 @@ async function generateAIMethod() {
   try {
     const model = getActiveModel();
     const rawText = await callAiText(prompt, model, 1000, true);
-    const steps = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+    const parsed = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+    // Ollama's format:json may wrap the array in an object {"steps":[...]}
+    const steps = Array.isArray(parsed)
+      ? parsed
+      : Object.values(parsed).find((v) => Array.isArray(v));
 
-    if (!Array.isArray(steps) || !steps.length)
+    if (!steps || !steps.length)
       throw new Error("No steps returned");
     window._aiGeneratedSteps = steps;
     statusEl.innerHTML =
