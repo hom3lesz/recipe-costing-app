@@ -16178,11 +16178,27 @@ async function startInvoiceScan() {
   document.getElementById("invoice-scan-btn").classList.add("hidden");
 
   const model = document.getElementById("inv-model")?.value || "claude";
+  // Ollama cannot process images — find a cloud model with a key as fallback
+  let scanModel = model;
+  if (model === "ollama") {
+    scanModel = ["claude", "gemini-flash", "gemini-flash-lite"].find((m) => getAiKey(m)) || "";
+    if (!scanModel) {
+      clearInterval(window._invScanInterval);
+      document.getElementById("invoice-scan-btn").classList.remove("hidden");
+      document.getElementById("invoice-status").innerHTML = "";
+      showToast(
+        "Invoice scanning requires a vision-capable model — add a Claude or Gemini key in Settings → AI Models.",
+        "error",
+        6000,
+      );
+      return;
+    }
+  }
   const pageLabel = results.length > 1 ? results.length + " pages" : "invoice";
 
   try {
     const modelName =
-      model === "gemini-flash" || model === "gemini-flash-lite"
+      scanModel === "gemini-flash" || scanModel === "gemini-flash-lite"
         ? "Gemini"
         : "Claude";
     const steps =
@@ -16227,11 +16243,11 @@ async function startInvoiceScan() {
 
     const prompt = buildInvoicePrompt(getIngCategories());
 
-    const apiKey = getInvoiceKey().trim();
+    const apiKey = getAiKey(scanModel);
     if (!apiKey)
       throw new Error(
         "No API key set. Go to ⚙ Settings to add your " +
-          (model === "gemini-flash" || model === "gemini-flash-lite"
+          (scanModel === "gemini-flash" || scanModel === "gemini-flash-lite"
             ? "Google"
             : "Anthropic") +
           " API key.",
@@ -16241,7 +16257,7 @@ async function startInvoiceScan() {
     const data = await window.electronAPI.scanInvoice(
       files,
       prompt,
-      model,
+      scanModel,
       apiKey,
     );
     const text = (data.content || [])
