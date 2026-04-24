@@ -41,6 +41,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
                  ipcRenderer.invoke('call-ai', { model, prompt, apiKey, maxTokens }),
   scanInvoice: (files, prompt, model, apiKey) =>
                  ipcRenderer.invoke('scan-invoice', { files, prompt, model, apiKey }),
+  callOllama:  (modelName, prompt, maxTokens) =>
+                 ipcRenderer.invoke('call-ollama', { modelName, prompt, maxTokens }),
+  testOllama:  () =>
+                 ipcRenderer.invoke('test-ollama'),
 
   // ── USDA Nutrition lookup ──────────────────────────────────────
   fetchUsdaNutrition: (names, apiKey) =>

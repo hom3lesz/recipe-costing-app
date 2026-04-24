@@ -14039,9 +14039,7 @@ async function testOllamaConnection() {
   if (!statusEl) return;
   statusEl.innerHTML = '<span style="color:var(--text-muted)">Testing…</span>';
   try {
-    const res = await fetch("http://localhost:11434/api/tags");
-    if (!res.ok) throw new Error("not running");
-    const data = await res.json();
+    const data = await window.electronAPI.testOllama();
     const models = (data.models || []).map((m) => m.name);
     if (!modelName) {
       statusEl.innerHTML = '<span style="color:var(--text-muted)">Ollama running — enter a model name above</span>';
@@ -16054,19 +16052,8 @@ async function callGeminiText(prompt, maxTokens) {
 async function callOllamaText(prompt, maxTokens) {
   const modelName = getAiKey("ollama");
   if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
-  const res = await fetch("http://localhost:11434/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [{ role: "user", content: prompt }],
-      stream: false,
-      ...(maxTokens ? { options: { num_predict: maxTokens } } : {}),
-    }),
-  });
-  if (!res.ok) throw new Error("Ollama not reachable — make sure it's running (ollama serve).");
-  const data = await res.json();
-  return (data.message?.content || "").replace(/```json|```/g, "").trim();
+  const content = await window.electronAPI.callOllama(modelName, prompt, maxTokens);
+  return (content || "").replace(/```json|```/g, "").trim();
 }
 
 // ─── Unified AI text dispatcher ───────────────────────────────────────────────

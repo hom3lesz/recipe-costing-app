@@ -537,6 +537,45 @@ ipcMain.handle('open-invoice', async () => {
 
 // ─── Shared HTTPS helper ──────────────────────────────────────────────────────
 const https = require('https');
+const http = require('http');
+
+function httpPost(hostname, port, urlPath, body) {
+  return new Promise((resolve, reject) => {
+    const buf = Buffer.from(body);
+    const req = http.request({
+      hostname, port, path: urlPath, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': buf.length }
+    }, (res) => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => {
+        try { resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, json: JSON.parse(data) }); }
+        catch(e) { reject(new Error('Bad JSON from Ollama: ' + data.slice(0, 200))); }
+      });
+    });
+    req.on('error', reject);
+    req.write(buf);
+    req.end();
+  });
+}
+
+function httpGet(hostname, port, urlPath) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname, port, path: urlPath, method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    }, (res) => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => {
+        try { resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, json: JSON.parse(data) }); }
+        catch(e) { reject(new Error('Bad JSON from Ollama: ' + data.slice(0, 200))); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 function httpsPost(hostname, urlPath, headers, body) {
   return new Promise((resolve, reject) => {
     const req = https.request({
@@ -614,6 +653,29 @@ ipcMain.handle('call-ai', async (_, { model, prompt, apiKey, maxTokens }) => {
     if (data.error) throw new Error(data.error.message || 'Claude API error');
     return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
   }
+});
+
+// ─── Ollama local AI ──────────────────────────────────────────────────────────
+ipcMain.handle('call-ollama', async (_, { modelName, prompt, maxTokens }) => {
+  if (!modelName || typeof modelName !== 'string' || !modelName.trim())
+    throw new Error('No Ollama model name provided.');
+  if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('Empty prompt.');
+  const tokens = maxTokens ? Math.min(Math.max(parseInt(maxTokens) || 1000, 1), 32000) : undefined;
+  const body = JSON.stringify({
+    model: modelName.trim(),
+    messages: [{ role: 'user', content: prompt }],
+    stream: false,
+    ...(tokens ? { options: { num_predict: tokens } } : {}),
+  });
+  const result = await httpPost('127.0.0.1', 11434, '/api/chat', body);
+  if (!result.ok) throw new Error("Ollama not reachable — make sure it's running (ollama serve).");
+  return result.json.message?.content || '';
+});
+
+ipcMain.handle('test-ollama', async () => {
+  const result = await httpGet('127.0.0.1', 11434, '/api/tags');
+  if (!result.ok) throw new Error('Ollama returned non-200 status.');
+  return result.json; // { models: [{name: "...", ...}, ...] }
 });
 
 // Scan invoice — accepts pre-loaded base64 files from renderer (no fs access in renderer)
