@@ -1538,7 +1538,7 @@ async function aiAutoImportSheet() {
     'SPREADSHEET DATA:\n' + tableText;
 
   try {
-    const raw = await callAiText(prompt, model, 8000);
+    const raw = await callAiText(prompt, model, 8000, true);
     const cleaned = String(raw || "").replace(/```json|```/g, "").trim();
 
     // Accept either a flat JSON array or a combined {suppliers, ingredients} object.
@@ -7322,7 +7322,7 @@ ${url ? "URL: " + url : "Recipe text:\n" + text}
 Return ONLY valid JSON, no markdown, no explanation.`;
 
   try {
-    const raw = await callAiText(prompt, model);
+    const raw = await callAiText(prompt, model, undefined, true);
     const recipe = JSON.parse(raw);
     renderImportPreview(recipe);
   } catch (e) {
@@ -10941,7 +10941,7 @@ Each element: {"name": "<exact ingredient name>", "category": "<category>"}
 Ingredients to categorise:
 ${batch.map((x) => x.name).join("\n")}`;
 
-      const raw = await callGeminiText(prompt);
+      const raw = await callAiText(prompt, getActiveModel(), undefined, true);
       let parsed;
       try {
         parsed = JSON.parse(raw);
@@ -16049,10 +16049,10 @@ async function callGeminiText(prompt, maxTokens) {
 }
 
 // ─── Ollama local AI ──────────────────────────────────────────────────────────
-async function callOllamaText(prompt, maxTokens) {
+async function callOllamaText(prompt, maxTokens, jsonMode = false) {
   const modelName = getAiKey("ollama");
   if (!modelName) throw new Error("No Ollama model configured — add one in Settings → AI Models.");
-  const content = await window.electronAPI.callOllama(modelName, prompt, maxTokens);
+  const content = await window.electronAPI.callOllama(modelName, prompt, maxTokens, jsonMode);
   return (content || "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "") // strip Qwen3/DeepSeek thinking blocks
     .replace(/```json\s*|```\s*/g, "")         // strip markdown fences
@@ -16060,8 +16060,8 @@ async function callOllamaText(prompt, maxTokens) {
 }
 
 // ─── Unified AI text dispatcher ───────────────────────────────────────────────
-async function callAiText(prompt, model, maxTokens) {
-  if (model === "ollama") return callOllamaText(prompt, maxTokens);
+async function callAiText(prompt, model, maxTokens, jsonMode = false) {
+  if (model === "ollama") return callOllamaText(prompt, maxTokens, jsonMode);
   const key = getAiKey(model);
   if (!key) throw new Error("No API key for " + model + ". Add it in Settings → AI Models.");
   const text = await window.electronAPI.callAi(model, prompt, key, maxTokens || 1000);
@@ -18560,7 +18560,7 @@ async function _runAiNutrScan(ings) {
         `- salt = sodium × 2.5 (UK convention)\n- Use typical raw values unless name implies cooked\n` +
         `- Round to 1 decimal place\n- If completely unknown, omit that ingredient\n\nIngredients:\n` +
         ingList;
-      const resultText = await callAiText(prompt, model, 4000);
+      const resultText = await callAiText(prompt, model, 4000, true);
       const batchMap = _parseAiNutrJson(resultText);
       Object.assign(allAiMap, batchMap);
     }
@@ -18849,7 +18849,7 @@ ${ingList}`;
     if (txt)
       txt.textContent = "AI is reviewing " + ings.length + " ingredients…";
 
-    const resultText = await callAiText(prompt, model, 8000);
+    const resultText = await callAiText(prompt, model, 8000, true);
 
     if (bar) bar.style.width = "90%";
     if (txt) txt.textContent = "Processing results…";
@@ -22613,7 +22613,7 @@ async function generateAIMethod() {
 
   try {
     const model = getActiveModel();
-    const rawText = await callAiText(prompt, model, 1000);
+    const rawText = await callAiText(prompt, model, 1000, true);
     const steps = JSON.parse(rawText.replace(/```json|```/g, "").trim());
 
     if (!Array.isArray(steps) || !steps.length)

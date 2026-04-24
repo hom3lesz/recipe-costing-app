@@ -656,7 +656,7 @@ ipcMain.handle('call-ai', async (_, { model, prompt, apiKey, maxTokens }) => {
 });
 
 // ─── Ollama local AI ──────────────────────────────────────────────────────────
-ipcMain.handle('call-ollama', async (_, { modelName, prompt, maxTokens }) => {
+ipcMain.handle('call-ollama', async (_, { modelName, prompt, maxTokens, jsonMode }) => {
   if (!modelName || typeof modelName !== 'string' || !modelName.trim())
     throw new Error('No Ollama model name provided.');
   if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('Empty prompt.');
@@ -665,7 +665,8 @@ ipcMain.handle('call-ollama', async (_, { modelName, prompt, maxTokens }) => {
     model: modelName.trim(),
     messages: [{ role: 'user', content: prompt }],
     stream: false,
-    think: false,  // disable Qwen3 thinking tokens (ignored by other models)
+    think: false,          // disable Qwen3 thinking tokens (ignored by other models)
+    ...(jsonMode ? { format: 'json' } : {}),  // grammar-constrained JSON output
     ...(tokens ? { options: { num_predict: tokens } } : {}),
   });
   const result = await httpPost('127.0.0.1', 11434, '/api/chat', body);

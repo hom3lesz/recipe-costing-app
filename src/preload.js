@@ -41,8 +41,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
                  ipcRenderer.invoke('call-ai', { model, prompt, apiKey, maxTokens }),
   scanInvoice: (files, prompt, model, apiKey) =>
                  ipcRenderer.invoke('scan-invoice', { files, prompt, model, apiKey }),
-  callOllama:  (modelName, prompt, maxTokens) =>
-                 ipcRenderer.invoke('call-ollama', { modelName, prompt, maxTokens }),
+  callOllama:  (modelName, prompt, maxTokens, jsonMode) =>
+                 ipcRenderer.invoke('call-ollama', { modelName, prompt, maxTokens, jsonMode }),
   testOllama:  () =>
                  ipcRenderer.invoke('test-ollama'),
 
