@@ -16326,7 +16326,7 @@ async function startInvoiceScan() {
           const hd = await window.electronAPI.scanInvoice(
             hFiles,
             headerPrompt,
-            model,
+            scanModel,
             apiKey,
           );
           const ht = (hd.content || [])
