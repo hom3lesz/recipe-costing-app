@@ -19460,14 +19460,15 @@ async function printRecipeCard(id) {
       ? `<p style="font-size:13px;line-height:1.6;color:#555;font-style:italic;margin:0">${escHtml(recipe.notes)}</p>`
       : '<p style="color:#aaa;font-size:12px">No method added</p>';
 
-  // Nutrition
+  // Nutrition — divide totals by portions to get per-portion values
+  const nutPortions = recipe.portions || 1;
   const nutHtml = nutrition.kcal
     ? `<div style="display:flex;gap:0;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;font-size:12px">
         ${[
-          ["Calories", Math.round(nutrition.kcal) + "kcal"],
-          ["Protein", nutrition.protein.toFixed(1) + "g"],
-          ["Fat", nutrition.fat.toFixed(1) + "g"],
-          ["Carbs", nutrition.carbs.toFixed(1) + "g"],
+          ["Calories", Math.round(nutrition.kcal / nutPortions) + "kcal"],
+          ["Protein", (nutrition.protein / nutPortions).toFixed(1) + "g"],
+          ["Fat", (nutrition.fat / nutPortions).toFixed(1) + "g"],
+          ["Carbs", (nutrition.carbs / nutPortions).toFixed(1) + "g"],
         ]
           .map(
             ([l, v]) =>
