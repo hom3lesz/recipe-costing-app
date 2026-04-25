@@ -466,12 +466,17 @@
           <h1>Settings</h1>
           <div style="font-size:12px;color:var(--text-muted);margin-top:3px">Changes save automatically · <span id="settings-save-status" style="color:var(--green)"></span></div>
         </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn-secondary" onclick="exportBackup()">📁 Backup data</button>
-          <button class="btn-secondary" onclick="openRestoreModal()">↩ Restore</button>
-        </div>
       </div>
-      <div style="padding:24px 28px 40px;max-width:960px;display:flex;flex-direction:column;gap:20px">
+      <!-- Settings tab bar -->
+      <div id="settings-tab-bar" style="display:flex;border-bottom:1px solid var(--border);padding:0 28px;background:var(--bg-card2)">
+        <button onclick="showSettingsTab('general')" data-tab="general" style="padding:12px 18px;background:none;border:none;border-bottom:2px solid var(--accent);color:var(--accent);font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">⚙ General</button>
+        <button onclick="showSettingsTab('ai')" data-tab="ai" style="padding:12px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-muted);font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">✨ AI &amp; Keys</button>
+        <button onclick="showSettingsTab('data')" data-tab="data" style="padding:12px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-muted);font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">📦 Data &amp; Backup</button>
+        <button onclick="showSettingsTab('about')" data-tab="about" style="padding:12px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-muted);font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">ℹ About</button>
+      </div>
+
+      <!-- ═══ Tab: General ═══════════════════════════════════════════════════ -->
+      <div id="settings-tab-general" style="padding:24px 28px 40px;max-width:960px;display:flex;flex-direction:column;gap:20px">
 
       <!-- General Settings -->
       <div class="card">
@@ -549,7 +554,6 @@
         </div>
       </div>
 
-
       <!-- 🔒 PIN Lock -->
       <div class="card">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🔒 App Lock (PIN)</div>
@@ -579,6 +583,16 @@
         </div>
       </div>
 
+      <!-- Locations -->
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">📍 Locations</div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Manage multiple locations — each with its own recipes, ingredients and suppliers.</p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-primary btn-sm" onclick="openLocationManager()">📍 Manage Locations</button>
+          <span id="settings-loc-count" style="font-size:12px;color:var(--text-muted)"></span>
+        </div>
+      </div>
+
       <!-- 🧪 Allergen Auto-Detection -->
       <div class="card">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🧪 Allergen Auto-Detection</div>
@@ -590,106 +604,10 @@
         </div>
       </div>
 
-      <!-- 📦 Data Transfer -->
-      <div class="card">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">📦 Data Transfer</div>
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Export data to a JSON file and import it on another device. Duplicates are skipped on import.</p>
+      </div><!-- /settings-tab-general -->
 
-        <!-- Recipes -->
-        <div style="margin-bottom:14px">
-          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">🍽 Recipes <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(includes costing data, versions, notes)</span></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn-secondary btn-sm" onclick="exportRecipes()">⬇ Export Recipes</button>
-            <button class="btn-secondary btn-sm" onclick="importRecipesFromFile()">⬆ Import Recipes</button>
-          </div>
-          <div id="recipe-import-status" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
-        </div>
-
-        <!-- Ingredients -->
-        <div style="margin-bottom:14px">
-          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">🧂 Ingredients</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn-secondary btn-sm" onclick="exportIngredients()">⬇ Export Ingredients</button>
-            <button class="btn-secondary btn-sm" onclick="importIngredientsFromFile()">⬆ Import (JSON)</button>
-            <button class="btn-secondary btn-sm" onclick="importIngredientsFromSpreadsheet()" title="Import from Excel or CSV with column mapping">📥 Import (Excel/CSV)</button>
-          </div>
-          <div id="ing-import-status" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
-        </div>
-
-        <!-- Suppliers -->
-        <div style="border-top:1px solid var(--border);padding-top:14px">
-          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">🚚 Suppliers <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(includes invoice history)</span></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn-secondary btn-sm" onclick="exportSuppliers()">⬇ Export Suppliers</button>
-            <button class="btn-secondary btn-sm" onclick="importSuppliersFromFile()">⬆ Import (JSON)</button>
-            <button class="btn-secondary btn-sm" onclick="importSuppliersFromSpreadsheet()" title="Import from Excel or CSV with column mapping">📥 Import (Excel/CSV)</button>
-          </div>
-          <div id="sup-import-status" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
-        </div>
-      </div>
-
-      <!-- Locations -->
-      <div class="card">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">📍 Locations</div>
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Manage multiple locations — each with its own recipes, ingredients and suppliers.</p>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button class="btn-primary btn-sm" onclick="openLocationManager()">📍 Manage Locations</button>
-          <span id="settings-loc-count" style="font-size:12px;color:var(--text-muted)"></span>
-        </div>
-      </div>
-
-      <!-- Auto-Backup & Restore -->
-      <div class="card">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🔄 Auto-Backup & Restore</div>
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">The app automatically keeps the last 5 encrypted backups of your data before each save. Select a backup below to restore it.</p>
-        <div style="display:flex;gap:8px;margin-bottom:14px">
-          <button class="btn-secondary btn-sm" onclick="loadBackupList()">↻ Refresh backup list</button>
-        </div>
-        <div id="backup-list-status" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
-        <div id="backup-list" style="display:flex;flex-direction:column;gap:6px"></div>
-      </div>
-
-      <!-- Cloud Sync / Folder Backup -->
-      <div class="card">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">☁ Cloud Sync & Folder Backup</div>
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
-          Choose a cloud sync folder to automatically back up your data.
-          Backups are saved as JSON files on each manual sync or automatically when enabled.
-        </p>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px;padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm);line-height:1.6">
-          💡 <b style="color:var(--text-secondary)">Tip:</b> Select a folder that's synced to the cloud by an app like <b>Google Drive</b>, <b>OneDrive</b>, or <b>Dropbox</b>. The folder appears as a normal folder on your PC — the cloud app syncs it automatically in the background.
-        </div>
-
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-          <button class="btn-primary btn-sm" onclick="chooseSyncFolder()">📂 Choose Folder</button>
-          <span id="sync-folder-path" style="font-size:11px;color:var(--text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No folder selected</span>
-          <button class="btn-secondary btn-sm" onclick="openSyncFolder()" id="btn-open-sync-folder" style="display:none">📁 Open</button>
-        </div>
-
-        <div id="sync-controls" style="display:none">
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-            <button class="btn-primary btn-sm" onclick="runSyncNow()">⬆ Sync Now</button>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-              <input type="checkbox" id="sync-auto-toggle" onchange="toggleAutoSync()" style="accent-color:var(--accent)">
-              <span style="font-size:12px;color:var(--text-secondary)">Auto-sync on save</span>
-            </label>
-            <button class="btn-secondary btn-sm" onclick="clearSyncFolder()" style="font-size:11px;color:var(--red)">✕ Disconnect</button>
-          </div>
-
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-            <label style="font-size:12px;color:var(--text-secondary);white-space:nowrap">Device name:</label>
-            <input type="text" id="sync-device-name" placeholder="e.g. Kitchen Laptop" style="width:180px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-size:12px;padding:5px 8px;border-radius:4px;outline:none">
-            <button class="btn-secondary btn-sm" onclick="saveDeviceName()" style="font-size:11px">Save</button>
-            <span style="font-size:11px;color:var(--text-muted)">Used to identify this PC in sync backups</span>
-          </div>
-
-          <div id="sync-status" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
-          <div id="conflict-badge" class="hidden" style="font-size:12px;margin-bottom:10px;display:inline-flex;align-items:center;gap:6px;background:var(--red);color:white;padding:4px 10px;border-radius:12px;cursor:pointer" onclick="ConflictResolver.openResolver()" title="Resolve sync conflicts">
-            <span>⚠</span><span id="conflict-badge-count">0</span><span>conflict(s) pending</span>
-          </div>
-          <div id="sync-backup-list" style="display:flex;flex-direction:column;gap:6px"></div>
-        </div>
-      </div>
+      <!-- ═══ Tab: AI & Keys ════════════════════════════════════════════════ -->
+      <div id="settings-tab-ai" style="display:none;padding:24px 28px 40px;max-width:960px;flex-direction:column;gap:20px">
 
       <!-- AI Invoice Scanner -->
       <div class="card">
@@ -775,6 +693,108 @@
         </div>
       </div>
 
+      </div><!-- /settings-tab-ai -->
+
+      <!-- ═══ Tab: Data & Backup ════════════════════════════════════════════ -->
+      <div id="settings-tab-data" style="display:none;padding:24px 28px 40px;max-width:960px;flex-direction:column;gap:20px">
+
+      <!-- Quick backup actions (moved from page header) -->
+      <div style="display:flex;gap:8px">
+        <button class="btn-secondary" onclick="exportBackup()">📁 Backup data</button>
+        <button class="btn-secondary" onclick="openRestoreModal()">↩ Restore</button>
+      </div>
+
+      <!-- 📦 Data Transfer -->
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">📦 Data Transfer</div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Export data to a JSON file and import it on another device. Duplicates are skipped on import.</p>
+
+        <!-- Recipes -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">🍽 Recipes <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(includes costing data, versions, notes)</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-secondary btn-sm" onclick="exportRecipes()">⬇ Export Recipes</button>
+            <button class="btn-secondary btn-sm" onclick="importRecipesFromFile()">⬆ Import Recipes</button>
+          </div>
+          <div id="recipe-import-status" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
+        </div>
+
+        <!-- Ingredients -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">🧂 Ingredients</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-secondary btn-sm" onclick="exportIngredients()">⬇ Export Ingredients</button>
+            <button class="btn-secondary btn-sm" onclick="importIngredientsFromFile()">⬆ Import (JSON)</button>
+            <button class="btn-secondary btn-sm" onclick="importIngredientsFromSpreadsheet()" title="Import from Excel or CSV with column mapping">📥 Import (Excel/CSV)</button>
+          </div>
+          <div id="ing-import-status" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
+        </div>
+
+        <!-- Suppliers -->
+        <div style="border-top:1px solid var(--border);padding-top:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">🚚 Suppliers <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(includes invoice history)</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-secondary btn-sm" onclick="exportSuppliers()">⬇ Export Suppliers</button>
+            <button class="btn-secondary btn-sm" onclick="importSuppliersFromFile()">⬆ Import (JSON)</button>
+            <button class="btn-secondary btn-sm" onclick="importSuppliersFromSpreadsheet()" title="Import from Excel or CSV with column mapping">📥 Import (Excel/CSV)</button>
+          </div>
+          <div id="sup-import-status" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
+        </div>
+      </div>
+
+      <!-- Auto-Backup & Restore -->
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">🔄 Auto-Backup & Restore</div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">The app automatically keeps the last 5 encrypted backups of your data before each save. Select a backup below to restore it.</p>
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+          <button class="btn-secondary btn-sm" onclick="loadBackupList()">↻ Refresh backup list</button>
+        </div>
+        <div id="backup-list-status" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
+        <div id="backup-list" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+
+      <!-- Cloud Sync / Folder Backup -->
+      <div class="card">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">☁ Cloud Sync & Folder Backup</div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+          Choose a cloud sync folder to automatically back up your data.
+          Backups are saved as JSON files on each manual sync or automatically when enabled.
+        </p>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px;padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:var(--radius-sm);line-height:1.6">
+          💡 <b style="color:var(--text-secondary)">Tip:</b> Select a folder that's synced to the cloud by an app like <b>Google Drive</b>, <b>OneDrive</b>, or <b>Dropbox</b>. The folder appears as a normal folder on your PC — the cloud app syncs it automatically in the background.
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <button class="btn-primary btn-sm" onclick="chooseSyncFolder()">📂 Choose Folder</button>
+          <span id="sync-folder-path" style="font-size:11px;color:var(--text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No folder selected</span>
+          <button class="btn-secondary btn-sm" onclick="openSyncFolder()" id="btn-open-sync-folder" style="display:none">📁 Open</button>
+        </div>
+
+        <div id="sync-controls" style="display:none">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+            <button class="btn-primary btn-sm" onclick="runSyncNow()">⬆ Sync Now</button>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="sync-auto-toggle" onchange="toggleAutoSync()" style="accent-color:var(--accent)">
+              <span style="font-size:12px;color:var(--text-secondary)">Auto-sync on save</span>
+            </label>
+            <button class="btn-secondary btn-sm" onclick="clearSyncFolder()" style="font-size:11px;color:var(--red)">✕ Disconnect</button>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+            <label style="font-size:12px;color:var(--text-secondary);white-space:nowrap">Device name:</label>
+            <input type="text" id="sync-device-name" placeholder="e.g. Kitchen Laptop" style="width:180px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-size:12px;padding:5px 8px;border-radius:4px;outline:none">
+            <button class="btn-secondary btn-sm" onclick="saveDeviceName()" style="font-size:11px">Save</button>
+            <span style="font-size:11px;color:var(--text-muted)">Used to identify this PC in sync backups</span>
+          </div>
+
+          <div id="sync-status" style="font-size:12px;color:var(--text-muted);margin-bottom:10px"></div>
+          <div id="conflict-badge" class="hidden" style="font-size:12px;margin-bottom:10px;display:inline-flex;align-items:center;gap:6px;background:var(--red);color:white;padding:4px 10px;border-radius:12px;cursor:pointer" onclick="ConflictResolver.openResolver()" title="Resolve sync conflicts">
+            <span>⚠</span><span id="conflict-badge-count">0</span><span>conflict(s) pending</span>
+          </div>
+          <div id="sync-backup-list" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+      </div>
+
       <!-- Activity Log -->
       <div class="card" id="activity-log-panel">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">📋 Activity Log</div>
@@ -832,6 +852,11 @@
         </div>
       </div>
 
+      </div><!-- /settings-tab-data -->
+
+      <!-- ═══ Tab: About ════════════════════════════════════════════════════ -->
+      <div id="settings-tab-about" style="display:none;padding:24px 28px 40px;max-width:960px;flex-direction:column;gap:20px">
+
       <!-- About / Updates -->
       <div class="card">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin-bottom:18px">ℹ About</div>
@@ -844,6 +869,8 @@
           <button class="btn-secondary" id="check-update-btn" onclick="checkForUpdate()">Check for updates</button>
         </div>
       </div>
+
+      </div><!-- /settings-tab-about -->
 
     </div><!-- /#view-settings -->
 
