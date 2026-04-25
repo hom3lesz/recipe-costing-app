@@ -559,3 +559,24 @@ describe('callOllamaText', () => {
     await expect(callOllamaTextStub("hello", 100, "")).rejects.toThrow("No Ollama model configured");
   });
 });
+
+describe('settings tab names', () => {
+  const SETTINGS_TABS = ['general', 'ai', 'data', 'about'];
+
+  test('there are exactly 4 tabs', () => {
+    expect(SETTINGS_TABS).toHaveLength(4);
+  });
+
+  test('tab names are lowercase strings with no spaces', () => {
+    SETTINGS_TABS.forEach(tab => {
+      expect(typeof tab).toBe('string');
+      expect(tab).toBe(tab.toLowerCase());
+      expect(tab).not.toContain(' ');
+    });
+  });
+
+  test('default tab is general', () => {
+    const defaultTab = SETTINGS_TABS[0];
+    expect(defaultTab).toBe('general');
+  });
+});

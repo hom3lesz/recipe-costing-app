@@ -14754,6 +14754,23 @@ async function restoreSyncBackup(filename) {
   }
 }
 
+// ── Settings tab state ──────────────────────────────────────────────────────
+let _settingsActiveTab = 'general';
+
+function showSettingsTab(name) {
+  _settingsActiveTab = name;
+  ['general', 'ai', 'data', 'about'].forEach(function (tab) {
+    const panel = document.getElementById('settings-tab-' + tab);
+    if (panel) panel.style.display = tab === name ? 'flex' : 'none';
+    const btn = document.querySelector('#settings-tab-bar [data-tab="' + tab + '"]');
+    if (btn) {
+      btn.style.color = tab === name ? 'var(--accent)' : 'var(--text-muted)';
+      btn.style.borderBottomColor = tab === name ? 'var(--accent)' : 'transparent';
+      btn.style.fontWeight = tab === name ? '700' : '600';
+    }
+  });
+}
+
 function renderSettingsPage() {
   renderPinStatus();
   loadBackupList();
@@ -14818,6 +14835,8 @@ function renderSettingsPage() {
     ActivityView.render();
     ActivityView._initFilterListeners();
   }
+  // Restore active tab after re-render
+  showSettingsTab(_settingsActiveTab);
 }
 
 async function saveUsdaKeySettings() {
