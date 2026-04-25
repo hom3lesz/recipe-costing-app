@@ -14758,8 +14758,10 @@ async function restoreSyncBackup(filename) {
 let _settingsActiveTab = 'general';
 
 function showSettingsTab(name) {
+  const VALID_TABS = ['general', 'ai', 'data', 'about'];
+  if (!VALID_TABS.includes(name)) { console.warn('showSettingsTab: unknown tab', name); return; }
   _settingsActiveTab = name;
-  ['general', 'ai', 'data', 'about'].forEach(function (tab) {
+  VALID_TABS.forEach(function (tab) {
     const panel = document.getElementById('settings-tab-' + tab);
     if (panel) panel.style.display = tab === name ? 'flex' : 'none';
     const btn = document.querySelector('#settings-tab-bar [data-tab="' + tab + '"]');
