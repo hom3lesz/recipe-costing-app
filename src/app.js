@@ -2044,11 +2044,19 @@ async function init() {
       if (r.locked === undefined) r.locked = false;
       if (!r.yieldQty) r.yieldQty = null;
       if (!r.yieldUnit) r.yieldUnit = "";
-      // Fix missing recipeUnit — default to library unit so conversions are correct
+      // Fix missing or incompatible recipeUnit — must be in the same unit dimension as the library unit
       (r.ingredients || []).forEach((ri) => {
+        const ing = state.ingredients.find((i) => i.id === ri.ingId);
+        if (!ing) return;
         if (!ri.recipeUnit) {
-          const ing = state.ingredients.find((i) => i.id === ri.ingId);
-          if (ing) ri.recipeUnit = ing.unit;
+          ri.recipeUnit = ing.unit;
+        } else {
+          // Verify stored recipeUnit is still compatible with the current ingredient unit.
+          // If the ingredient unit changed to a different dimension (e.g. g → each), reset it.
+          const compatible =
+            ri.recipeUnit === ing.unit ||
+            (UNIT_CONVERSIONS[ing.unit] && ri.recipeUnit in UNIT_CONVERSIONS[ing.unit]);
+          if (!compatible) ri.recipeUnit = ing.unit;
         }
       });
     });
@@ -10118,7 +10126,14 @@ function exportBatchPDF() {
       if (!ing) return '';
       const cost = ingLineCost(ri.ingId, ri.qty, ri.recipeUnit);
       const pct = totalCost > 0 ? ((cost / totalCost) * 100).toFixed(0) : 0;
-      return '<tr><td>' + escHtml(ing.name) + '</td><td style="text-align:right">' + ri.qty + ' ' + (ri.recipeUnit || ing.unit) + '</td><td style="text-align:right">' + cur + cost.toFixed(2) + '</td><td style="text-align:right;color:#888">' + pct + '%</td></tr>';
+      // Only use recipeUnit if it's compatible with the current ingredient unit (same dimension).
+      // Guards against stale units when the library unit was changed after the recipe was created.
+      const recipeUnitOk = ri.recipeUnit && (
+        ri.recipeUnit === ing.unit ||
+        (UNIT_CONVERSIONS[ing.unit] && ri.recipeUnit in UNIT_CONVERSIONS[ing.unit])
+      );
+      const displayUnit = recipeUnitOk ? ri.recipeUnit : ing.unit;
+      return '<tr><td>' + escHtml(ing.name) + '</td><td style="text-align:right">' + ri.qty + ' ' + displayUnit + '</td><td style="text-align:right">' + cur + cost.toFixed(2) + '</td><td style="text-align:right;color:#888">' + pct + '%</td></tr>';
     }).join('');
 
     // Sub-recipe rows
