@@ -60,6 +60,7 @@
 }
 
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes progressPulse { 0%,100% { opacity:.6 } 50% { opacity:1 } }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 html, body { height: 100%; overflow: hidden; }
 

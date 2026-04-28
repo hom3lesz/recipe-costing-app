@@ -15170,12 +15170,45 @@ function openRecipeScanModal() {
   document.getElementById("rscan-results").classList.add("hidden");
   document.getElementById("rscan-results").innerHTML = "";
   document.getElementById("rscan-scan-btn").classList.remove("hidden");
+  document.getElementById("rscan-paste-btn").classList.add("hidden");
   document.getElementById("rscan-apply-btn").classList.add("hidden");
+  // Reset to photo tab
+  rscanSwitchTab("photo");
   // Sync model selector with active model
   const sel = document.getElementById("rscan-model");
   const saved = getActiveModel();
   if (sel) sel.value = saved;
   document.getElementById("recipe-scan-modal").classList.remove("hidden");
+}
+
+function rscanSwitchTab(tab) {
+  const isPhoto = tab === "photo";
+  // Panel visibility
+  document.getElementById("rscan-photo-panel").style.display = isPhoto ? "" : "none";
+  document.getElementById("rscan-paste-panel").style.display = isPhoto ? "none" : "";
+  // Footer buttons
+  document.getElementById("rscan-scan-btn").classList.toggle("hidden", !isPhoto);
+  document.getElementById("rscan-paste-btn").classList.toggle("hidden", isPhoto);
+  // Always hide apply btn when switching tabs (unless results already shown)
+  if (_recipeScanData === null) {
+    document.getElementById("rscan-apply-btn").classList.add("hidden");
+  }
+  // Tab button styles
+  const photoTab = document.getElementById("rscan-tab-photo");
+  const pasteTab = document.getElementById("rscan-tab-paste");
+  if (photoTab) {
+    photoTab.style.background = isPhoto ? "var(--accent)" : "var(--bg-card2)";
+    photoTab.style.color = isPhoto ? "#fff" : "var(--text-secondary)";
+  }
+  if (pasteTab) {
+    pasteTab.style.background = isPhoto ? "var(--bg-card2)" : "var(--accent)";
+    pasteTab.style.color = isPhoto ? "var(--text-secondary)" : "#fff";
+  }
+  // Clear paste status when switching back to photo
+  if (isPhoto) {
+    const ps = document.getElementById("rscan-paste-status");
+    if (ps) ps.innerHTML = "";
+  }
 }
 
 function closeRecipeScanModal() {
@@ -15231,6 +15264,103 @@ function buildRecipeScanPrompt() {
     state.ingredients.map(i => i.name).join("\n") +
     "\n\nIf the image is unclear or not a recipe, return: {\"error\": \"Could not identify a recipe in this image.\"}"
   );
+}
+
+function buildRecipeScanPromptFromText(text) {
+  const units = ["g", "kg", "ml", "L", "each", "portion", "tbsp", "tsp", "bunch", "pinch", "slice"];
+  return (
+    "Extract the recipe from the following text and return ONLY valid JSON, no markdown, no explanation.\n\n" +
+    "Return this JSON structure:\n" +
+    JSON.stringify({
+      recipeName: "Name of the dish",
+      category: "Main|Starter|Dessert|Side|Sauce|Soup|Bakery|Drink|Other",
+      portions: 1,
+      notes: "Any method / cooking instructions / chef notes",
+      ingredients: [
+        {
+          name: "ingredient name as written",
+          qty: 0,
+          unit: "g|kg|ml|L|each|portion|tbsp|tsp|bunch|pinch|slice",
+          libraryMatch: null,
+          prepNote: ""
+        }
+      ]
+    }, null, 2) +
+    "\n\nCRITICAL RULES:\n" +
+    "- recipeName: Use the recipe title as written. Clean up capitalisation.\n" +
+    "- category: Must be one of: Main, Starter, Dessert, Side, Sauce, Soup, Bakery, Drink, Other.\n" +
+    "- portions: The number of servings / covers. Default 1 if not stated.\n" +
+    "- notes: Capture ALL cooking method / instructions / tips as a single string. Use newlines (\\n) for steps.\n" +
+    "- ingredients:\n" +
+    "  - name: The ingredient name as written, cleaned up (capitalise first letter, no leading quantities).\n" +
+    "  - qty: Numeric quantity. Convert fractions: ½→0.5, ¼→0.25, ¾→0.75. If \"a pinch\" use 1.\n" +
+    "  - unit: Normalise to one of: " + units.join(", ") + ".\n" +
+    "    Convert: teaspoon→tsp, tablespoon→tbsp, cup→250ml, pint→568ml, litre→L.\n" +
+    "    If the recipe says '2 onions' → qty=2, unit=each.\n" +
+    "    If weight given (200g chicken) → qty=200, unit=g.\n" +
+    "  - prepNote: Capture prep instructions like 'diced', 'finely chopped', 'room temperature'. Empty string if none.\n" +
+    "  - libraryMatch: If the ingredient closely matches one in the library below, return the EXACT library name. Otherwise null.\n" +
+    "\nIngredient library (match against these names):\n" +
+    state.ingredients.map(i => i.name).join("\n") +
+    "\n\nRecipe text:\n" + text +
+    "\n\nIf the text does not contain a recipe, return: {\"error\": \"Could not identify a recipe in this text.\"}"
+  );
+}
+
+async function startRecipeScanFromText() {
+  const text = (document.getElementById("rscan-paste-text")?.value || "").trim();
+  if (!text) {
+    showToast("Paste a recipe first", "error", 2000);
+    return;
+  }
+
+  const model = _rscanModel();
+  const apiKey = _rscanKey();
+  if (!apiKey && model !== "ollama") {
+    showToast("No API key set. Go to ⚙ Settings to add your " +
+      (model.startsWith("gemini") ? "Google" : "Anthropic") + " API key.", "error", 4000);
+    return;
+  }
+
+  const pasteBtn = document.getElementById("rscan-paste-btn");
+  if (pasteBtn) pasteBtn.classList.add("hidden");
+  document.getElementById("rscan-apply-btn").classList.add("hidden");
+  document.getElementById("rscan-results").classList.add("hidden");
+  document.getElementById("rscan-results").innerHTML = "";
+  _recipeScanData = null;
+
+  const modelName = model.startsWith("gemini") ? "Gemini" : "Claude";
+  const statusEl = document.getElementById("rscan-paste-status");
+  if (statusEl) statusEl.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px">' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" style="animation:spin 1s linear infinite;flex-shrink:0"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>' +
+    '<span style="font-size:13px;color:var(--text-secondary)">Extracting recipe…</span>' +
+    '<span style="font-size:11px;color:var(--text-muted);margin-left:4px">via ' + modelName + '</span></div>' +
+    '<div style="margin-top:8px;height:3px;background:var(--bg-card2);border-radius:2px;overflow:hidden">' +
+    '<div id="rscan-paste-bar" style="height:100%;width:30%;background:var(--accent);border-radius:2px;animation:progressPulse 1.5s ease-in-out infinite"></div></div>';
+
+  try {
+    const prompt = buildRecipeScanPromptFromText(text);
+    const raw = await callAiText(prompt, model, 2000, true);
+    const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
+
+    if (parsed.error) {
+      if (statusEl) statusEl.innerHTML =
+        '<div style="color:var(--red);font-size:13px;margin:8px 0">⚠ ' + escHtml(parsed.error) + '</div>';
+      if (pasteBtn) pasteBtn.classList.remove("hidden");
+      return;
+    }
+
+    if (statusEl) statusEl.innerHTML = "";
+    _recipeScanData = parsed;
+    _recipeScanMatchIngredients();
+    renderRecipeScanResults();
+
+  } catch (err) {
+    if (statusEl) statusEl.innerHTML =
+      '<div style="color:var(--red);font-size:13px;margin:8px 0">⚠ ' + escHtml(err.message || "Extraction failed") + '</div>';
+    if (pasteBtn) pasteBtn.classList.remove("hidden");
+  }
 }
 
 async function startRecipeScan() {

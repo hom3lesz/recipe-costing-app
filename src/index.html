@@ -1341,7 +1341,7 @@
 <div id="recipe-scan-modal" class="modal-overlay hidden">
   <div class="modal" style="width:900px;max-height:90vh;display:flex;flex-direction:column">
     <div class="modal-header">
-      <h2>📷 Scan Recipe from Photo</h2>
+      <h2>✨ Scan / Import Recipe</h2>
       <button class="modal-close" onclick="closeRecipeScanModal()">✕</button>
     </div>
     <div class="modal-body" style="flex:1;overflow-y:auto">
@@ -1357,16 +1357,45 @@
         <button class="btn-secondary btn-sm" onclick="showView('settings');closeRecipeScanModal()" style="white-space:nowrap">⚙ Keys</button>
       </div>
 
-      <div id="rscan-status" style="color:var(--text-secondary);font-size:13px;margin-bottom:12px">
-        Take a photo of a handwritten or printed recipe — the AI will extract ingredients, quantities, and method, then match them to your ingredient library for instant costing.
+      <!-- Tab strip -->
+      <div style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;width:fit-content">
+        <button id="rscan-tab-photo" onclick="rscanSwitchTab('photo')"
+          style="padding:7px 18px;font-family:var(--font);font-size:13px;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:background .15s">
+          📷 Photo / PDF
+        </button>
+        <button id="rscan-tab-paste" onclick="rscanSwitchTab('paste')"
+          style="padding:7px 18px;font-family:var(--font);font-size:13px;font-weight:600;border:none;cursor:pointer;background:var(--bg-card2);color:var(--text-secondary);border-left:1px solid var(--border);transition:background .15s">
+          📋 Paste Text
+        </button>
       </div>
 
-      <!-- Results area -->
+      <!-- Photo / PDF panel -->
+      <div id="rscan-photo-panel">
+        <div id="rscan-status" style="color:var(--text-secondary);font-size:13px;margin-bottom:12px">
+          Take a photo of a handwritten or printed recipe — the AI will extract ingredients, quantities, and method, then match them to your ingredient library for instant costing.
+        </div>
+      </div>
+
+      <!-- Paste text panel (hidden by default) -->
+      <div id="rscan-paste-panel" style="display:none">
+        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">
+          Paste any recipe text below — handwritten notes, a copied web recipe, a printed sheet. The AI will extract ingredients, quantities, and method and match them to your library.
+        </div>
+        <textarea id="rscan-paste-text"
+          placeholder="Paste your recipe here…&#10;&#10;e.g.&#10;Classic Beef Burger (serves 4)&#10;&#10;200g beef mince&#10;1 brioche bun&#10;50g cheddar cheese&#10;…"
+          style="width:100%;min-height:200px;max-height:340px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font);font-size:13px;line-height:1.6;padding:12px 14px;resize:vertical;outline:none;box-sizing:border-box;transition:border-color .15s"
+          onfocus="this.style.borderColor='var(--border-light)'"
+          onblur="this.style.borderColor='var(--border)'"></textarea>
+        <div id="rscan-paste-status" style="margin-top:10px;font-size:13px;color:var(--text-secondary)"></div>
+      </div>
+
+      <!-- Results area (shared by both tabs) -->
       <div id="rscan-results" class="hidden"></div>
     </div>
     <div class="modal-footer" style="justify-content:flex-end">
       <button class="btn-secondary" onclick="closeRecipeScanModal()">Cancel</button>
       <button class="btn-primary" id="rscan-scan-btn" onclick="startRecipeScan()">📂 Choose Photo / PDF</button>
+      <button class="btn-primary hidden" id="rscan-paste-btn" onclick="startRecipeScanFromText()">✨ Extract from Text</button>
       <button class="btn-primary hidden" id="rscan-apply-btn" onclick="applyRecipeScan()">✓ Create Recipe</button>
     </div>
   </div>
