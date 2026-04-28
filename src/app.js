@@ -15240,7 +15240,7 @@ function _rscanKey() {
 }
 
 function buildRecipeScanPrompt() {
-  const cats = getIngCategories();
+  const recipeCats = getRecipeCategories();
   const units = ["g", "kg", "ml", "L", "each", "portion", "tbsp", "tsp", "bunch", "pinch", "slice"];
   return (
     "This is a photo of a recipe (handwritten, printed, or from a screen). " +
@@ -15248,7 +15248,7 @@ function buildRecipeScanPrompt() {
     "Return this JSON structure:\n" +
     JSON.stringify({
       recipeName: "Name of the dish",
-      category: "Main|Starter|Dessert|Side|Sauce|Soup|Bakery|Drink|Other",
+      category: recipeCats.join("|"),
       portions: 1,
       notes: "Any method / cooking instructions / chef notes",
       ingredients: [
@@ -15263,7 +15263,7 @@ function buildRecipeScanPrompt() {
     }, null, 2) +
     "\n\nCRITICAL RULES:\n" +
     "- recipeName: Use the recipe title as written. Clean up capitalisation.\n" +
-    "- category: Must be one of: Main, Starter, Dessert, Side, Sauce, Soup, Bakery, Drink, Other.\n" +
+    "- category: Must be one of: " + recipeCats.join(", ") + ". Pick the closest match.\n" +
     "- portions: The number of servings / covers. Default 1 if not stated.\n" +
     "- notes: Capture ALL cooking method / instructions / tips as a single string. Use newlines (\\n) for steps.\n" +
     "- ingredients:\n" +
@@ -15282,13 +15282,14 @@ function buildRecipeScanPrompt() {
 }
 
 function buildRecipeScanPromptFromText(text) {
+  const recipeCats = getRecipeCategories();
   const units = ["g", "kg", "ml", "L", "each", "portion", "tbsp", "tsp", "bunch", "pinch", "slice"];
   return (
     "Extract the recipe from the following text and return ONLY valid JSON, no markdown, no explanation.\n\n" +
     "Return this JSON structure:\n" +
     JSON.stringify({
       recipeName: "Name of the dish",
-      category: "Main|Starter|Dessert|Side|Sauce|Soup|Bakery|Drink|Other",
+      category: recipeCats.join("|"),
       portions: 1,
       notes: "Any method / cooking instructions / chef notes",
       ingredients: [
@@ -15303,7 +15304,7 @@ function buildRecipeScanPromptFromText(text) {
     }, null, 2) +
     "\n\nCRITICAL RULES:\n" +
     "- recipeName: Use the recipe title as written. Clean up capitalisation.\n" +
-    "- category: Must be one of: Main, Starter, Dessert, Side, Sauce, Soup, Bakery, Drink, Other.\n" +
+    "- category: Must be one of: " + recipeCats.join(", ") + ". Pick the closest match.\n" +
     "- portions: The number of servings / covers. Default 1 if not stated.\n" +
     "- notes: Capture ALL cooking method / instructions / tips as a single string. Use newlines (\\n) for steps.\n" +
     "- ingredients:\n" +
@@ -15513,11 +15514,23 @@ function renderRecipeScanResults() {
   html += '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">';
   html += '<div class="form-group" style="margin:0;flex:2;min-width:200px"><label style="font-size:11px;color:var(--text-muted)">Recipe Name</label>';
   html += '<input type="text" id="rscan-name" value="' + escAttr(d.recipeName || "Scanned Recipe") + '" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:14px;font-weight:700;padding:8px 10px;border-radius:5px;outline:none;width:100%;box-sizing:border-box"></div>';
-  html += '<div class="form-group" style="margin:0;flex:1;min-width:120px"><label style="font-size:11px;color:var(--text-muted)">Category</label>';
-  html += '<select id="rscan-category" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;padding:8px 10px;border-radius:5px;outline:none;width:100%;box-sizing:border-box">';
-  const cats = ["Main", "Starter", "Dessert", "Side", "Sauce", "Soup", "Bakery", "Drink", "Other"];
+  // Category dropdown — use the app's actual recipe categories
+  const cats = getRecipeCategories();
+  const aiCat = (d.category || "").trim();
+  // Case-insensitive match against user's categories
+  const matchedCat = cats.find(c => c.toLowerCase() === aiCat.toLowerCase());
+  const catMissing = aiCat && !matchedCat;
+  // If no match, default to first category; otherwise use the matched one
+  const selectedCat = matchedCat || cats[0] || "";
+  html += '<div class="form-group" style="margin:0;flex:1;min-width:140px">';
+  html += '<label style="font-size:11px;color:var(--text-muted)">Category</label>';
+  if (catMissing) {
+    html += '<div style="font-size:11px;color:var(--amber,#d97706);background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.3);border-radius:4px;padding:4px 8px;margin-bottom:5px">'
+          + '⚠ AI suggested <b>' + escHtml(aiCat) + '</b> — not in your categories. Please select below.</div>';
+  }
+  html += '<select id="rscan-category" style="background:var(--bg-input);border:1px solid ' + (catMissing ? 'rgba(217,119,6,.6)' : 'var(--border)') + ';color:var(--text-primary);font-family:var(--font);font-size:13px;padding:8px 10px;border-radius:5px;outline:none;width:100%;box-sizing:border-box">';
   cats.forEach(function (c) {
-    html += '<option' + (c === (d.category || "Main") ? ' selected' : '') + '>' + escHtml(c) + '</option>';
+    html += '<option' + (c === selectedCat ? ' selected' : '') + '>' + escHtml(c) + '</option>';
   });
   html += '</select></div>';
   html += '<div class="form-group" style="margin:0;width:80px"><label style="font-size:11px;color:var(--text-muted)">Portions</label>';
