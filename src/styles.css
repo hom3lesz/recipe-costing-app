@@ -2596,9 +2596,9 @@ input[type=range].gp-slider {
   font-style: italic;
 }
 
-/* ─── Notes Panel (above ingredients) ─── */
+/* ─── Method / Notes Panel — below ingredients inside the left column ─── */
 .recipe-notes-panel {
-  margin: 0 0 8px;
+  margin-top: 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;

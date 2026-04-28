@@ -5942,70 +5942,6 @@ function renderRecipeEditor() {
     <!-- Nutrition bar (visible only when ingredient nutrition data exists) -->
     ${buildNutritionBar(recipe)}
 
-    <!-- Method steps panel -->
-    <div class="recipe-notes-panel${(recipe.methods || []).length || recipe.notes ? " notes-has-content" : ""}">
-      <div class="recipe-notes-header" onclick="toggleNotesPanel()">
-        <div style="display:flex;align-items:center;gap:10px">
-          <h3 style="margin:0">📋 Method</h3>
-          ${(recipe.methods || []).length ? `<span style="font-size:10px;color:var(--text-muted);background:var(--bg-card2);border:1px solid var(--border);padding:1px 7px;border-radius:10px">${(recipe.methods || []).length} step${(recipe.methods || []).length !== 1 ? "s" : ""}</span>` : ""}
-          ${recipe.prepTime || recipe.cookTime ? `<span style="font-size:11px;color:var(--text-muted)">${[recipe.prepTime ? "Prep: " + recipe.prepTime + "min" : null, recipe.cookTime ? "Cook: " + recipe.cookTime + "min" : null].filter(Boolean).join(" · ")}</span>` : ""}
-        </div>
-        <span id="notes-chevron" style="font-size:11px;color:var(--text-muted)">${(recipe.methods || []).length || recipe.notes ? "▴" : "▾"}</span>
-      </div>
-      <div class="recipe-notes-body" id="recipe-notes-body" style="${(recipe.methods || []).length || recipe.notes ? "" : "display:none"}">
-        <!-- Prep / Cook time -->
-        <div style="display:flex;align-items:center;gap:20px;margin-bottom:12px;padding:8px 12px 12px;border-bottom:1px solid var(--border)">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:10px;color:var(--text-muted);font-weight:700;letter-spacing:.6px;text-transform:uppercase">Prep</span>
-            <input type="number" min="0" placeholder="0" value="${recipe.prepTime || ""}"
-              oninput="updateRecipeField('prepTime',+this.value||null)"
-              style="width:56px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;font-weight:600;padding:5px 8px;border-radius:5px;outline:none;text-align:center;line-height:1" />
-            <span style="font-size:11px;color:var(--text-muted)">min</span>
-          </div>
-          <div style="width:1px;height:20px;background:var(--border)"></div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:10px;color:var(--text-muted);font-weight:700;letter-spacing:.6px;text-transform:uppercase">Cook</span>
-            <input type="number" min="0" placeholder="0" value="${recipe.cookTime || ""}"
-              oninput="updateRecipeField('cookTime',+this.value||null)"
-              style="width:56px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;font-weight:600;padding:5px 8px;border-radius:5px;outline:none;text-align:center;line-height:1" />
-            <span style="font-size:11px;color:var(--text-muted)">min</span>
-          </div>
-        </div>
-        <!-- Numbered steps -->
-        <div id="method-steps-list">
-          ${(recipe.methods || [])
-            .map(
-              (step, i) => `
-            <div class="method-step" data-idx="${i}">
-              <div class="method-step-num">${i + 1}</div>
-              <textarea class="method-step-text" rows="2"
-                oninput="updateMethodStep(${i},this.value)"
-                placeholder="Describe step ${i + 1}…">${escHtml(step)}</textarea>
-              <button class="method-step-del" onclick="removeMethodStep(${i})" title="Remove step">×</button>
-            </div>
-          `,
-            )
-            .join("")}
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
-          <button class="btn-secondary btn-sm" style="font-size:12px" onclick="addMethodStep()">
-            + Add Step
-          </button>
-          <button class="btn-secondary btn-sm" style="font-size:12px" onclick="openPasteMethodModal()" title="Paste numbered text and split into steps automatically">
-            📋 Paste Method
-          </button>
-        </div>
-        <!-- Additional Notes — always visible -->
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
-          <div style="font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--text-muted);margin-bottom:8px">ADDITIONAL NOTES</div>
-          <textarea class="recipe-notes" placeholder="Add any additional notes, allergy reminders, plating instructions…"
-            oninput="updateRecipeField('notes',this.value)"
-            style="width:100%;min-height:80px;max-height:200px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font);font-size:13px;line-height:1.6;padding:10px 12px;resize:vertical;outline:none;box-sizing:border-box;transition:border-color .15s"
-            onfocus="this.style.borderColor='var(--border-light)'" onblur="this.style.borderColor='var(--border)'">${escHtml(recipe.notes || "")}</textarea>
-        </div>
-      </div>
-    </div>
-
     <div class="recipe-body">
       <div class="ingredients-panel">
         <div class="panel-heading">
@@ -6071,6 +6007,70 @@ function renderRecipeEditor() {
         </div>`
             : ""
         }
+
+        <!-- Method steps panel — below ingredients/allergens -->
+        <div class="recipe-notes-panel${(recipe.methods || []).length || recipe.notes ? " notes-has-content" : ""}">
+          <div class="recipe-notes-header" onclick="toggleNotesPanel()">
+            <div style="display:flex;align-items:center;gap:10px">
+              <h3 style="margin:0">📋 Method</h3>
+              ${(recipe.methods || []).length ? `<span style="font-size:10px;color:var(--text-muted);background:var(--bg-card2);border:1px solid var(--border);padding:1px 7px;border-radius:10px">${(recipe.methods || []).length} step${(recipe.methods || []).length !== 1 ? "s" : ""}</span>` : ""}
+              ${recipe.prepTime || recipe.cookTime ? `<span style="font-size:11px;color:var(--text-muted)">${[recipe.prepTime ? "Prep: " + recipe.prepTime + "min" : null, recipe.cookTime ? "Cook: " + recipe.cookTime + "min" : null].filter(Boolean).join(" · ")}</span>` : ""}
+            </div>
+            <span id="notes-chevron" style="font-size:11px;color:var(--text-muted)">${(recipe.methods || []).length || recipe.notes ? "▴" : "▾"}</span>
+          </div>
+          <div class="recipe-notes-body" id="recipe-notes-body" style="${(recipe.methods || []).length || recipe.notes ? "" : "display:none"}">
+            <!-- Prep / Cook time -->
+            <div style="display:flex;align-items:center;gap:20px;margin-bottom:12px;padding:8px 12px 12px;border-bottom:1px solid var(--border)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:10px;color:var(--text-muted);font-weight:700;letter-spacing:.6px;text-transform:uppercase">Prep</span>
+                <input type="number" min="0" placeholder="0" value="${recipe.prepTime || ""}"
+                  oninput="updateRecipeField('prepTime',+this.value||null)"
+                  style="width:56px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;font-weight:600;padding:5px 8px;border-radius:5px;outline:none;text-align:center;line-height:1" />
+                <span style="font-size:11px;color:var(--text-muted)">min</span>
+              </div>
+              <div style="width:1px;height:20px;background:var(--border)"></div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:10px;color:var(--text-muted);font-weight:700;letter-spacing:.6px;text-transform:uppercase">Cook</span>
+                <input type="number" min="0" placeholder="0" value="${recipe.cookTime || ""}"
+                  oninput="updateRecipeField('cookTime',+this.value||null)"
+                  style="width:56px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font);font-size:13px;font-weight:600;padding:5px 8px;border-radius:5px;outline:none;text-align:center;line-height:1" />
+                <span style="font-size:11px;color:var(--text-muted)">min</span>
+              </div>
+            </div>
+            <!-- Numbered steps -->
+            <div id="method-steps-list">
+              ${(recipe.methods || [])
+                .map(
+                  (step, i) => `
+                <div class="method-step" data-idx="${i}">
+                  <div class="method-step-num">${i + 1}</div>
+                  <textarea class="method-step-text" rows="2"
+                    oninput="updateMethodStep(${i},this.value)"
+                    placeholder="Describe step ${i + 1}…">${escHtml(step)}</textarea>
+                  <button class="method-step-del" onclick="removeMethodStep(${i})" title="Remove step">×</button>
+                </div>
+              `,
+                )
+                .join("")}
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+              <button class="btn-secondary btn-sm" style="font-size:12px" onclick="addMethodStep()">
+                + Add Step
+              </button>
+              <button class="btn-secondary btn-sm" style="font-size:12px" onclick="openPasteMethodModal()" title="Paste numbered text and split into steps automatically">
+                📋 Paste Method
+              </button>
+            </div>
+            <!-- Additional Notes — always visible -->
+            <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--text-muted);margin-bottom:8px">ADDITIONAL NOTES</div>
+              <textarea class="recipe-notes" placeholder="Add any additional notes, allergy reminders, plating instructions…"
+                oninput="updateRecipeField('notes',this.value)"
+                style="width:100%;min-height:80px;max-height:200px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font);font-size:13px;line-height:1.6;padding:10px 12px;resize:vertical;outline:none;box-sizing:border-box;transition:border-color .15s"
+                onfocus="this.style.borderColor='var(--border-light)'" onblur="this.style.borderColor='var(--border)'">${escHtml(recipe.notes || "")}</textarea>
+            </div>
+          </div>
+        </div>
 
       </div>
 
@@ -6155,7 +6155,7 @@ function renderRecipeEditor() {
           ${buildWhatIfPanel(recipe, costPerPortion)}
           <!-- Nutrition summary -->
           ${buildNutritionSummary(recipe)}
-          <!-- Recipe photo — bottom of panel -->
+          <!-- Recipe photo — bottom of right panel -->
           <div class="recipe-photo-drop-zone ${recipe.photo ? "has-photo" : ""}"
             id="photo-drop-${recipe.id}"
             ondragover="event.preventDefault();this.classList.add('drag-over')"
