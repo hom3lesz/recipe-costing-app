@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Recipe Costing — Know Your Numbers. Own Your Kitchen.</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          50:  '#fffbeb',
+          100: '#fef3c7',
+          400: '#fbbf24',
+          500: '#e8a838',
+          600: '#c48c20',
+          900: '#78350f',
+        },
+        dark: {
+          50:  '#e8eaf6',
+          100: '#9196be',
+          200: '#5c6190',
+          300: '#4f547a',
+          400: '#35395c',
+          500: '#2a2d4a',
+          600: '#1f2235',
+          700: '#191c2a',
+          800: '#131520',
+          900: '#0d0f18',
+        }
+      },
+      fontFamily: {
+        sans: ['Inter','Segoe UI','system-ui','-apple-system','sans-serif'],
+      },
+      backgroundImage: {
+        'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+      },
+      keyframes: {
+        'float': { '0%,100%': { transform: 'translateY(0px)' }, '50%': { transform: 'translateY(-16px)' } },
+        'pulse-glow': { '0%,100%': { opacity: '0.4' }, '50%': { opacity: '0.8' } },
+        'slide-up': { from: { opacity: '0', transform: 'translateY(30px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
+        'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'shimmer': { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
+      },
+      animation: {
+        'float': 'float 6s ease-in-out infinite',
+        'float-slow': 'float 9s ease-in-out infinite',
+        'pulse-glow': 'pulse-glow 3s ease-in-out infinite',
+        'slide-up': 'slide-up 0.6s ease-out forwards',
+        'fade-in': 'fade-in 0.8s ease-out forwards',
+        'shimmer': 'shimmer 3s linear infinite',
+      }
+    }
+  }
+}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+  *,*::before,*::after{box-sizing:border-box}
+  html{font-family:'Inter',system-ui,sans-serif;background:#0d0f18;color:#e8eaf6;overflow-x:hidden}
+  ::-webkit-scrollbar{width:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#35395c;border-radius:99px}
+  ::-webkit-scrollbar-thumb:hover{background:#5c6190}
+
+  /* Gradient text */
+  .text-gradient { background: linear-gradient(135deg, #e8a838 0%, #f5d485 40%, #e8a838 80%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .text-gradient-cool { background: linear-gradient(135deg, #5b8dee 0%, #9b72f5 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+
+  /* Glass morphism */
+  .glass { background: rgba(25,28,42,0.7); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(53,57,92,0.5); }
+  .glass-bright { background: rgba(31,34,53,0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(53,57,92,0.6); }
+
+  /* Glow effects */
+  .glow-amber { box-shadow: 0 0 40px rgba(232,168,56,0.2), 0 0 80px rgba(232,168,56,0.08); }
+  .glow-blue { box-shadow: 0 0 40px rgba(91,141,238,0.2), 0 0 80px rgba(91,141,238,0.08); }
+  .glow-text { text-shadow: 0 0 30px rgba(232,168,56,0.5); }
+
+  /* Gradient borders */
+  .border-gradient { border: 1px solid transparent; background: linear-gradient(#191c2a,#191c2a) padding-box, linear-gradient(135deg,#e8a838,#5b8dee) border-box; }
+  .border-gradient-hover:hover { border: 1px solid transparent; background: linear-gradient(#1f2235,#1f2235) padding-box, linear-gradient(135deg,#e8a838,#9b72f5) border-box; }
+
+  /* Background orbs */
+  .orb { position: absolute; border-radius: 50%; filter: blur(80px); pointer-events: none; }
+
+  /* Scroll-driven ContainerScroll */
+  .scroll-perspective { perspective: 1200px; }
+  #hero-card { transform-origin: center top; transition: transform 0.1s linear; }
+
+  /* Feature card hover */
+  .feature-card { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease; }
+  .feature-card:hover { transform: translateY(-4px); }
+
+  /* Nav link underline animation */
+  .nav-link { position: relative; }
+  .nav-link::after { content: ''; position: absolute; bottom: -2px; left: 0; width: 0; height: 2px; background: #e8a838; transition: width 0.2s ease; border-radius: 99px; }
+  .nav-link:hover::after { width: 100%; }
+
+  /* Shimmer button */
+  .btn-shimmer { background: linear-gradient(90deg, #e8a838 0%, #f5d485 25%, #e8a838 50%, #c48c20 75%, #e8a838 100%); background-size: 200% auto; animation: shimmer 3s linear infinite; }
+
+  /* Step connector line */
+  .step-line { position: absolute; top: 24px; left: calc(50% + 24px); right: calc(-50% + 24px); height: 1px; background: linear-gradient(90deg, #e8a838, #5b8dee); }
+
+  /* Stat counter */
+  .stat-card { transition: transform 0.2s ease; }
+  .stat-card:hover { transform: translateY(-2px); }
+
+  /* Screenshot scroll */
+  .screens-track { display: flex; gap: 24px; animation: marquee 30s linear infinite; }
+  @keyframes marquee { 0% { transform: translateX(0) } 100% { transform: translateX(-50%) } }
+  .screens-track:hover { animation-play-state: paused; }
+</style>
+</head>
+<body class="dark">
+
+<!-- ══════════════════════════════════════════════
+     NAV
+══════════════════════════════════════════════ -->
+<nav id="navbar" class="fixed top-0 left-0 right-0 z-50 transition-all duration-300">
+  <div class="max-w-7xl mx-auto px-6 h-16 flex items-center gap-8">
+    <!-- Logo -->
+    <a href="#" class="flex items-center gap-3 flex-shrink-0">
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style="border-radius:8px;flex-shrink:0;box-shadow:0 4px 14px rgba(232,168,56,.3)">
+        <rect width="36" height="36" rx="8" fill="#1a1208"/>
+        <rect width="36" height="36" rx="8" fill="#e8a838" fill-opacity="0.18"/>
+        <path d="M24.16 16.8c-.21-.28-.47-.52-.71-.76-.62-.56-1.32-.96-1.91-1.54-1.37-1.37-1.67-3.56-.79-5.3-.92.21-1.75.7-2.41 1.22-2.28 1.9-3.2 5.29-2.08 8.16.04.09.07.18.07.3 0 .2-.14.39-.32.46-.2.09-.43.04-.6-.11-.05-.05-.09-.09-.13-.16-1.09-1.57-1.25-3.44-.56-4.97C13.9 15.42 13.08 17.55 13.2 19.55c.06.46.11.93.27 1.39.13.55.38 1.1.65 1.6 1.04 1.83 2.76 2.97 4.61 3.2 1.98.25 4.09-.11 5.6-1.48 1.69-1.53 2.28-3.99 1.41-6.09l-.12-.24c-.19-.43-.71-1.16-.71-1.16z" fill="#e8a838"/>
+        <path d="M24.16 16.8c-.21-.28-.47-.52-.71-.76-.62-.56-1.32-.96-1.91-1.54-1.37-1.37-1.67-3.56-.79-5.3-.92.21-1.75.7-2.41 1.22-2.28 1.9-3.2 5.29-2.08 8.16.04.09.07.18.07.3 0 .2-.14.39-.32.46-.2.09-.43.04-.6-.11-.05-.05-.09-.09-.13-.16-1.09-1.57-1.25-3.44-.56-4.97C13.9 15.42 13.08 17.55 13.2 19.55c.06.46.11.93.27 1.39.13.55.38 1.1.65 1.6 1.04 1.83 2.76 2.97 4.61 3.2 1.98.25 4.09-.11 5.6-1.48 1.69-1.53 2.28-3.99 1.41-6.09l-.12-.24c-.19-.43-.71-1.16-.71-1.16z" fill="#fff" fill-opacity="0.08"/>
+      </svg>
+      <span class="font-bold text-base text-dark-50 leading-tight">Recipe<br><span class="text-brand-500 font-black">Costing</span></span>
+    </a>
+
+    <!-- Links -->
+    <div class="hidden md:flex items-center gap-7 ml-4">
+      <a href="#features" class="nav-link text-sm text-dark-100 hover:text-dark-50 transition-colors">Features</a>
+      <a href="#how" class="nav-link text-sm text-dark-100 hover:text-dark-50 transition-colors">How it works</a>
+      <a href="#screens" class="nav-link text-sm text-dark-100 hover:text-dark-50 transition-colors">Screenshots</a>
+      <a href="#pricing" class="nav-link text-sm text-dark-100 hover:text-dark-50 transition-colors">Pricing</a>
+    </div>
+
+    <div class="ml-auto flex items-center gap-3">
+      <span class="hidden sm:inline-flex items-center gap-1.5 text-xs text-brand-500 font-semibold bg-brand-500/10 border border-brand-500/20 px-3 py-1.5 rounded-full">
+        <span class="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse"></span> v0.0.48 — Free
+      </span>
+      <a href="#download" class="btn-shimmer text-dark-900 text-sm font-bold px-5 py-2 rounded-xl shadow-lg hover:shadow-brand-500/30 transition-shadow">
+        Download Free →
+      </a>
+    </div>
+  </div>
+</nav>
+
+
+<!-- ══════════════════════════════════════════════
+     HERO — ContainerScroll
+══════════════════════════════════════════════ -->
+<section id="hero" class="relative min-h-screen flex flex-col items-center justify-start pt-32 pb-0 overflow-hidden">
+
+  <!-- Background orbs -->
+  <div class="orb w-[600px] h-[600px] bg-brand-500/20 top-[-200px] left-[-200px] animate-pulse-glow"></div>
+  <div class="orb w-[500px] h-[500px] bg-blue-600/15 top-[100px] right-[-150px] animate-pulse-glow" style="animation-delay:1.5s"></div>
+  <div class="orb w-[400px] h-[400px] bg-purple-600/10 bottom-[100px] left-[20%]" style="animation-delay:3s"></div>
+
+  <!-- Badge -->
+  <div class="relative flex items-center gap-2 glass px-4 py-2 rounded-full mb-8 text-sm font-medium animate-slide-up">
+    <span class="text-brand-500">✦</span>
+    <span class="text-dark-100">Built for professional kitchens &amp; independent restaurants</span>
+    <span class="ml-1 text-xs bg-brand-500 text-dark-900 font-bold px-2 py-0.5 rounded-full">FREE</span>
+  </div>
+
+  <!-- Headline -->
+  <h1 class="relative text-center text-5xl md:text-7xl font-black leading-[1.05] tracking-tight max-w-4xl px-6 mb-6" style="animation: slide-up 0.6s ease-out 0.1s both">
+    Know Your Numbers.<br>
+    <span class="text-gradient">Own Your Kitchen.</span>
+  </h1>
+
+  <!-- Sub -->
+  <p class="relative text-center text-lg md:text-xl text-dark-100 max-w-2xl px-6 mb-10 leading-relaxed" style="animation: slide-up 0.6s ease-out 0.2s both">
+    Calculate recipe costs, GP %, allergens and nutrition in seconds. The free Windows desktop app built for chefs who take their margins seriously.
+  </p>
+
+  <!-- CTAs -->
+  <div class="relative flex flex-col sm:flex-row gap-4 items-center mb-16" style="animation: slide-up 0.6s ease-out 0.3s both">
+    <a href="#download" class="btn-shimmer text-dark-900 font-bold px-8 py-3.5 rounded-2xl text-base shadow-2xl shadow-brand-500/25 hover:scale-105 transition-transform">
+      ⬇ Download for Windows — Free
+    </a>
+    <a href="#screens" class="glass border-gradient-hover text-dark-50 font-semibold px-8 py-3.5 rounded-2xl text-base hover:scale-105 transition-transform">
+      See it in action →
+    </a>
+  </div>
+
+  <!-- Social proof -->
+  <div class="relative flex items-center gap-6 text-sm text-dark-200 mb-20">
+    <div class="flex items-center gap-1.5">
+      <div class="flex -space-x-2">
+        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 border-2 border-dark-900 flex items-center justify-center text-xs">👨‍🍳</div>
+        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 border-2 border-dark-900 flex items-center justify-center text-xs">👩‍🍳</div>
+        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-green-500 to-teal-500 border-2 border-dark-900 flex items-center justify-center text-xs">🧑‍🍳</div>
+      </div>
+      <span>2,000+ chefs</span>
+    </div>
+    <div class="flex items-center gap-1">
+      <span class="text-brand-500">★★★★★</span>
+      <span>4.9 / 5</span>
+    </div>
+    <div class="flex items-center gap-1.5">
+      <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+      <span>Free · No account needed</span>
+    </div>
+  </div>
+
+  <!-- ─── ContainerScroll ─── -->
+  <div id="scroll-section" class="relative w-full max-w-6xl px-4 pb-0" style="height:700px">
+    <div class="scroll-perspective w-full h-full flex flex-col items-center">
+      <!-- Title above card (translates up on scroll) -->
+      <div id="scroll-title" class="text-center mb-8 transition-transform duration-100">
+        <p class="text-dark-200 text-sm font-medium uppercase tracking-widest mb-2">See the full picture</p>
+        <h2 class="text-2xl md:text-3xl font-bold text-dark-50">Every recipe. Every margin. One view.</h2>
+      </div>
+
+      <!-- The 3D card — real app screenshot -->
+      <div id="hero-card" class="w-full max-w-5xl rounded-[24px] border-4 border-dark-400 bg-dark-800 p-2 md:p-3 shadow-2xl glow-amber"
+           style="transform: rotateX(18deg) scale(1.04); transform-origin: center top">
+        <div class="w-full rounded-2xl overflow-hidden" style="height:440px">
+          <img src="/assets/ss-recipes.png" alt="Recipe Costing — Recipes view"
+               class="w-full h-full object-cover object-top" style="border-radius:12px"/>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+
+<!-- ══════════════════════════════════════════════
+     STATS BAND
+══════════════════════════════════════════════ -->
+<section class="relative py-16 overflow-hidden">
+  <div class="orb w-[300px] h-[300px] bg-brand-500/10 top-0 left-1/2 -translate-x-1/2"></div>
+  <div class="max-w-5xl mx-auto px-6">
+    <div class="glass rounded-3xl p-8 grid grid-cols-2 md:grid-cols-4 gap-8 glow-amber">
+      <div class="stat-card text-center">
+        <div class="text-4xl font-black text-gradient mb-1">2k+</div>
+        <div class="text-sm text-dark-200">Chefs &amp; Restaurateurs</div>
+      </div>
+      <div class="stat-card text-center">
+        <div class="text-4xl font-black text-gradient mb-1">50k+</div>
+        <div class="text-sm text-dark-200">Recipes Created</div>
+      </div>
+      <div class="stat-card text-center">
+        <div class="text-4xl font-black text-gradient mb-1">4.9★</div>
+        <div class="text-sm text-dark-200">Average Rating</div>
+      </div>
+      <div class="stat-card text-center">
+        <div class="text-4xl font-black text-gradient mb-1">£0</div>
+        <div class="text-sm text-dark-200">Forever Free</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════
+     FEATURES
+══════════════════════════════════════════════ -->
+<section id="features" class="relative py-24 overflow-hidden">
+  <div class="orb w-[500px] h-[500px] bg-purple-600/10 top-0 right-0"></div>
+
+  <div class="max-w-7xl mx-auto px-6">
+    <div class="text-center mb-16">
+      <div class="inline-flex items-center gap-2 glass px-4 py-2 rounded-full text-sm text-brand-500 font-semibold mb-5">
+        <span>⚡</span> Everything you need, nothing you don't
+      </div>
+      <h2 class="text-4xl md:text-5xl font-black text-dark-50 mb-4">Built for the real kitchen</h2>
+      <p class="text-lg text-dark-200 max-w-2xl mx-auto">From a single café to a multi-site restaurant group — Recipe Costing scales with you.</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+      <!-- F1 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-brand-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">💰</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">Instant GP Calculation</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Enter ingredients and quantities — cost, GP%, sell price and VAT calculate automatically. Set your target GP and get a suggested price.</p>
+      </div>
+
+      <!-- F2 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-purple-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">✨</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">AI Method Writer</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Generate professional step-by-step cooking methods with one click. Supports Claude, Gemini Flash, and local Ollama models for complete privacy.</p>
+      </div>
+
+      <!-- F3 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-green-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">🏠</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">Multi-Site Management</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Manage multiple kitchen locations from one app. Each site has its own recipe library, supplier contacts and GP targets.</p>
+      </div>
+
+      <!-- F4 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-red-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">⚠️</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">Allergen Tracking</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Automatically detect the 14 major allergens from your ingredients. View allergen matrices by recipe and print compliant labels.</p>
+      </div>
+
+      <!-- F5 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-blue-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">🖨️</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">Recipe Card Printing</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Print polished recipe cards with per-portion nutrition, allergens, cost and GP — perfect for kitchen folders and staff training.</p>
+      </div>
+
+      <!-- F6 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-brand-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">📊</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">Dashboard &amp; Insights</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">GP by category, top performers, low-margin alerts and activity log — everything you need to keep margins healthy.</p>
+      </div>
+
+      <!-- F7 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-teal-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">📦</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">Order Sheet Generator</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Build weekly order sheets from your recipes with one click. Export to Excel for emailing to suppliers.</p>
+      </div>
+
+      <!-- F8 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-orange-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">🔒</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">PIN Lock &amp; Privacy</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Protect your recipe costs with a PIN lock. Your data never leaves your machine — 100% offline, no cloud account required.</p>
+      </div>
+
+      <!-- F9 -->
+      <div class="feature-card glass-bright rounded-2xl p-7 border-gradient-hover group">
+        <div class="w-12 h-12 rounded-2xl bg-pink-500/15 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">🥗</div>
+        <h3 class="text-lg font-bold text-dark-50 mb-2">Nutrition Calculator</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">USDA-powered nutrition lookup. View kcal, protein, fat and carbs per portion — perfect for menu labelling compliance.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════
+     HOW IT WORKS
+══════════════════════════════════════════════ -->
+<section id="how" class="relative py-24 overflow-hidden">
+  <div class="orb w-[400px] h-[400px] bg-brand-500/10 bottom-0 left-0"></div>
+
+  <div class="max-w-5xl mx-auto px-6">
+    <div class="text-center mb-16">
+      <div class="inline-flex items-center gap-2 glass px-4 py-2 rounded-full text-sm text-blue-400 font-semibold mb-5">
+        <span>🗺</span> Simple three-step setup
+      </div>
+      <h2 class="text-4xl md:text-5xl font-black text-dark-50 mb-4">Up and running in minutes</h2>
+      <p class="text-lg text-dark-200 max-w-xl mx-auto">No database setup. No subscription. No cloud. Just download and start costing.</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 relative">
+      <!-- connector lines (desktop) -->
+      <div class="hidden md:block absolute top-10 left-[calc(33%+20px)] right-[calc(33%+20px)] h-[2px] bg-gradient-to-r from-brand-500 to-blue-500 opacity-40"></div>
+
+      <!-- Step 1 -->
+      <div class="glass-bright rounded-2xl p-8 text-center relative">
+        <div class="w-14 h-14 rounded-2xl bg-brand-500 flex items-center justify-center text-2xl font-black text-dark-900 mx-auto mb-5 shadow-lg shadow-brand-500/30">1</div>
+        <h3 class="text-xl font-bold text-dark-50 mb-3">Build your ingredient library</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Add your ingredients once with pack sizes and costs. Import from Excel if you have them already.</p>
+        <div class="mt-5 text-3xl animate-float">🧂</div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="glass-bright rounded-2xl p-8 text-center relative">
+        <div class="w-14 h-14 rounded-2xl bg-blue-500 flex items-center justify-center text-2xl font-black text-white mx-auto mb-5 shadow-lg shadow-blue-500/30">2</div>
+        <h3 class="text-xl font-bold text-dark-50 mb-3">Create your recipes</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Pick ingredients, set quantities and portions. Costs, GP and allergens appear instantly as you type.</p>
+        <div class="mt-5 text-3xl animate-float" style="animation-delay:.5s">📋</div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="glass-bright rounded-2xl p-8 text-center relative">
+        <div class="w-14 h-14 rounded-2xl bg-green-500 flex items-center justify-center text-2xl font-black text-white mx-auto mb-5 shadow-lg shadow-green-500/30">3</div>
+        <h3 class="text-xl font-bold text-dark-50 mb-3">Hit your margin targets</h3>
+        <p class="text-dark-200 text-sm leading-relaxed">Set a GP target. The app flags low-margin recipes and suggests price adjustments to keep you profitable.</p>
+        <div class="mt-5 text-3xl animate-float" style="animation-delay:1s">📈</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════
+     SCREENSHOT MARQUEE
+══════════════════════════════════════════════ -->
+<section id="screens" class="relative py-20 overflow-hidden">
+  <div class="text-center mb-12 px-6">
+    <h2 class="text-4xl font-black text-dark-50 mb-3">See every screen</h2>
+    <p class="text-dark-200">Hover to pause</p>
+  </div>
+
+  <div class="overflow-hidden">
+    <div class="screens-track w-max" style="animation: marquee 40s linear infinite">
+      <!-- Real app screenshots × 2 for seamless loop -->
+      <!-- Home -->
+      <div class="flex-shrink-0 rounded-2xl overflow-hidden border border-dark-400 shadow-xl" style="width:427px;height:240px">
+        <img src="/assets/ss-home.png" alt="Home view" class="w-full h-full object-cover object-top"/>
+      </div>
+      <!-- Recipes -->
+      <div class="flex-shrink-0 rounded-2xl overflow-hidden border border-dark-400 shadow-xl" style="width:427px;height:240px">
+        <img src="/assets/ss-recipes.png" alt="Recipes list" class="w-full h-full object-cover object-top"/>
+      </div>
+      <!-- Recipe Detail -->
+      <div class="flex-shrink-0 rounded-2xl overflow-hidden border border-dark-400 shadow-xl" style="width:427px;height:240px">
+        <img src="/assets/ss-detail.png" alt="Recipe costing view" class="w-full h-full object-cover object-top"/>
+      </div>
+      <!-- Dashboard -->
+      <div class="flex-shrink-0 rounded-2xl overflow-hidden border border-dark-400 shadow-xl" style="width:427px;height:240px">
+        <img src="/assets/ss-dashboard.png" alt="Cost Dashboard" class="w-full h-full object-cover object-top"/>
+      </div>
+      <!-- Duplicate set for seamless loop -->
+      <div class="flex-shrink-0 rounded-2xl overflow-hidden border border-dark-400 shadow-xl" style="width:427px;height:240px">
+        <img src="/assets/ss-home.png" alt="Home view" class="w-full h-full object-cover object-top"/>
+      </div>
+      <div class="flex-shrink-0 rounded-2xl overflow-hidden border border-dark-400 shadow-xl" style="width:427px;height:240px">
+        <img src="/assets/ss-recipes.png" alt="Recipes list" class="w-full h-full object-cover object-top"/>
+      </div>
+      <div class="flex-shrink-0 rounded-2xl overflow-hidden border border-dark-400 shadow-xl" style="width:427px;height:240px">
+        <img src="/assets/ss-detail.png" alt="Recipe costing view" class="w-full h-full object-cover object-top"/>
+      </div>
+      <div class="flex-shrink-0 rounded-2xl overflow-hidden border border-dark-400 shadow-xl" style="width:427px;height:240px">
+        <img src="/assets/ss-dashboard.png" alt="Cost Dashboard" class="w-full h-full object-cover object-top"/>
+      </div>
+
+
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════
+     TESTIMONIALS
+══════════════════════════════════════════════ -->
+<section class="relative py-24 overflow-hidden">
+  <div class="orb w-[400px] h-[400px] bg-blue-600/10 top-0 right-0"></div>
+
+  <div class="max-w-7xl mx-auto px-6">
+    <div class="text-center mb-14">
+      <h2 class="text-4xl md:text-5xl font-black text-dark-50 mb-3">Loved by chefs</h2>
+      <p class="text-dark-200">Real feedback from real kitchens</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="glass-bright rounded-2xl p-7 border-gradient-hover relative">
+        <div class="text-brand-500 text-xl mb-4">★★★★★</div>
+        <p class="text-dark-100 text-sm leading-relaxed mb-6">"I was spending 2 hours every week on a spreadsheet. Recipe Costing does the same in minutes. The GP alerts alone have saved me hundreds a month."</p>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-lg">👨‍🍳</div>
+          <div><div class="text-sm font-bold text-dark-50">Marco D.</div><div class="text-xs text-dark-300">Head Chef, Osteria Milano</div></div>
+        </div>
+      </div>
+
+      <div class="glass-bright rounded-2xl p-7 border-gradient-hover relative">
+        <div class="text-brand-500 text-xl mb-4">★★★★★</div>
+        <p class="text-dark-100 text-sm leading-relaxed mb-6">"The AI method writer is insane. I drafted 30 recipe cards for our new menu in one afternoon. The allergen tracking is rock-solid for our compliance audits."</p>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-lg">👩‍🍳</div>
+          <div><div class="text-sm font-bold text-dark-50">Sarah K.</div><div class="text-xs text-dark-300">Restaurant Owner, 3 sites</div></div>
+        </div>
+      </div>
+
+      <div class="glass-bright rounded-2xl p-7 border-gradient-hover relative">
+        <div class="text-brand-500 text-xl mb-4">★★★★★</div>
+        <p class="text-dark-100 text-sm leading-relaxed mb-6">"Free, offline, no account — this ticked every box my GDPR officer needed. The multi-site feature is perfect for our hotel group."</p>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-teal-500 flex items-center justify-center text-lg">🧑‍🍳</div>
+          <div><div class="text-sm font-bold text-dark-50">James P.</div><div class="text-xs text-dark-300">F&amp;B Manager, Horizon Hotels</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════
+     CTA / DOWNLOAD
+══════════════════════════════════════════════ -->
+<section id="download" class="relative py-28 overflow-hidden">
+  <div class="orb w-[700px] h-[700px] bg-brand-500/15 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse-glow"></div>
+
+  <div class="max-w-3xl mx-auto px-6 text-center relative">
+    <div class="inline-flex items-center gap-2 glass px-4 py-2 rounded-full text-sm text-green-400 font-semibold mb-6">
+      <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span> Windows 10/11 · Free forever · No account needed
+    </div>
+
+    <h2 class="text-5xl md:text-6xl font-black text-dark-50 mb-5 leading-tight">
+      Start knowing your<br><span class="text-gradient glow-text">true margins</span> today.
+    </h2>
+
+    <p class="text-lg text-dark-200 mb-10 max-w-xl mx-auto">Download Recipe Costing for free. No trial. No nag screens. No cloud sync. Just a fast, private desktop app that works.</p>
+
+    <div class="flex flex-col sm:flex-row gap-4 justify-center mb-8">
+      <a href="https://github.com/hom3lesz/recipe-costing-app/releases" target="_blank"
+         class="btn-shimmer text-dark-900 font-black text-lg px-10 py-4 rounded-2xl shadow-2xl shadow-brand-500/30 hover:scale-105 transition-transform inline-flex items-center gap-3">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M13 8V2H7v6H2l8 8 8-8h-5z"/></svg>
+        Download v0.0.48 — Free
+      </a>
+    </div>
+
+    <div class="flex items-center justify-center gap-8 text-sm text-dark-300">
+      <span class="flex items-center gap-1.5">✓ Windows 10 &amp; 11</span>
+      <span class="flex items-center gap-1.5">✓ x64 &amp; ARM64</span>
+      <span class="flex items-center gap-1.5">✓ Auto-updates</span>
+      <span class="flex items-center gap-1.5">✓ 100% offline</span>
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════
+     FOOTER
+══════════════════════════════════════════════ -->
+<footer class="border-t border-dark-500 py-12">
+  <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
+    <div class="flex items-center gap-3">
+      <svg width="32" height="32" viewBox="0 0 36 36" fill="none" style="border-radius:8px;flex-shrink:0;box-shadow:0 2px 8px rgba(232,168,56,.25)">
+        <rect width="36" height="36" rx="8" fill="#1a1208"/>
+        <rect width="36" height="36" rx="8" fill="#e8a838" fill-opacity="0.18"/>
+        <path d="M24.16 16.8c-.21-.28-.47-.52-.71-.76-.62-.56-1.32-.96-1.91-1.54-1.37-1.37-1.67-3.56-.79-5.3-.92.21-1.75.7-2.41 1.22-2.28 1.9-3.2 5.29-2.08 8.16.04.09.07.18.07.3 0 .2-.14.39-.32.46-.2.09-.43.04-.6-.11-.05-.05-.09-.09-.13-.16-1.09-1.57-1.25-3.44-.56-4.97C13.9 15.42 13.08 17.55 13.2 19.55c.06.46.11.93.27 1.39.13.55.38 1.1.65 1.6 1.04 1.83 2.76 2.97 4.61 3.2 1.98.25 4.09-.11 5.6-1.48 1.69-1.53 2.28-3.99 1.41-6.09l-.12-.24c-.19-.43-.71-1.16-.71-1.16z" fill="#e8a838"/>
+      </svg>
+      <div>
+        <div class="font-bold text-dark-50 text-sm">Recipe Costing</div>
+        <div class="text-xs text-dark-300">GP Calculator for Windows</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-6 text-sm text-dark-300">
+      <a href="https://github.com/hom3lesz/recipe-costing-app" target="_blank" class="hover:text-dark-50 transition-colors flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        GitHub
+      </a>
+      <a href="#features" class="hover:text-dark-50 transition-colors">Features</a>
+      <a href="#download" class="hover:text-dark-50 transition-colors">Download</a>
+    </div>
+    <div class="text-xs text-dark-300">© 2025 Recipe Costing · Free &amp; Open Source</div>
+  </div>
+</footer>
+
+
+<!-- ══════════════════════════════════════════════
+     JS — ContainerScroll + Nav scroll
+══════════════════════════════════════════════ -->
+<script>
+// Nav scroll effect
+const navbar = document.getElementById('navbar');
+window.addEventListener('scroll', () => {
+  if (window.scrollY > 20) {
+    navbar.style.background = 'rgba(13,15,24,0.95)';
+    navbar.style.backdropFilter = 'blur(20px)';
+    navbar.style.borderBottom = '1px solid rgba(42,45,74,0.6)';
+    navbar.style.boxShadow = '0 4px 30px rgba(0,0,0,0.4)';
+  } else {
+    navbar.style.background = 'transparent';
+    navbar.style.backdropFilter = 'none';
+    navbar.style.borderBottom = 'none';
+    navbar.style.boxShadow = 'none';
+  }
+});
+
+// ContainerScroll animation
+const section = document.getElementById('scroll-section');
+const card = document.getElementById('hero-card');
+const scrollTitle = document.getElementById('scroll-title');
+
+function updateScroll() {
+  if (!section || !card) return;
+  const rect = section.getBoundingClientRect();
+  const windowH = window.innerHeight;
+
+  // progress: 0 when section top is at viewport bottom, 1 when section is fully scrolled past
+  const totalScrollRange = windowH + rect.height;
+  const scrolled = windowH - rect.top;
+  const progress = Math.max(0, Math.min(1, scrolled / totalScrollRange));
+
+  // rotateX: 18 -> 0
+  const rotateX = 18 * (1 - progress);
+  // scale: 1.04 -> 1.0
+  const scale = 1.04 - (0.04 * progress);
+  // title translateY: 0 -> -60px
+  const titleY = -60 * progress;
+
+  card.style.transform = `rotateX(${rotateX}deg) scale(${scale})`;
+  if (scrollTitle) scrollTitle.style.transform = `translateY(${titleY}px)`;
+}
+
+window.addEventListener('scroll', updateScroll, { passive: true });
+updateScroll();
+
+// Intersection observer for section animations
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.style.opacity = '1';
+      entry.target.style.transform = 'translateY(0)';
+    }
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('.feature-card, .stat-card').forEach(el => {
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(20px)';
+  el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+  observer.observe(el);
+});
+</script>
+
+</body>
+</html>
