@@ -200,7 +200,7 @@ tailwind.config = {
   </div>
 
   <!-- ─── ContainerScroll ─── -->
-  <div id="scroll-section" class="relative w-full max-w-6xl px-4 pb-0" style="height:700px">
+  <div id="scroll-section" class="relative w-full max-w-6xl px-4 pb-0" style="height:580px">
     <div class="scroll-perspective w-full h-full flex flex-col items-center">
       <!-- Title above card (translates up on scroll) -->
       <div id="scroll-title" class="text-center mb-8 transition-transform duration-100">
@@ -211,9 +211,9 @@ tailwind.config = {
       <!-- The 3D card — real app screenshot -->
       <div id="hero-card" class="w-full max-w-5xl rounded-[24px] border-4 border-dark-400 bg-dark-800 p-2 md:p-3 shadow-2xl glow-amber"
            style="transform: rotateX(18deg) scale(1.04); transform-origin: center top">
-        <div class="w-full rounded-2xl overflow-hidden" style="height:440px">
+        <div class="w-full rounded-2xl overflow-hidden">
           <img src="/assets/ss-recipes.png" alt="Recipe Costing — Recipes view"
-               class="w-full h-full object-cover object-top" style="border-radius:12px"/>
+               class="w-full h-auto block" style="border-radius:12px"/>
         </div>
       </div>
     </div>
