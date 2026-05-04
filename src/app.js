@@ -5598,10 +5598,10 @@ function renderTabBar() {
   bar.innerHTML = tabs.map(id => {
     const r = state.recipes.find(r => r.id === id);
     const name = r ? r.name : "Unknown";
-    const truncated = name.length > 22 ? name.slice(0, 22) + "…" : name;
+    const truncated = escHtml(name.length > 22 ? name.slice(0, 22) + "…" : name);
     const isActive = id === state.activeRecipeId;
     return `<div class="recipe-tab${isActive ? " active" : ""}" onclick="switchToTab('${id}')">
-      <span class="recipe-tab-name" title="${name.replace(/'/g, "&#39;")}">${truncated}</span>
+      <span class="recipe-tab-name" title="${escAttr(name)}">${truncated}</span>
       <button class="recipe-tab-close" onclick="event.stopPropagation();closeTab('${id}')" title="Close tab">✕</button>
     </div>`;
   }).join("");
@@ -5614,6 +5614,7 @@ function switchToTab(id) {
 }
 
 function closeTab(id) {
+  if (!state.openTabs) state.openTabs = [];
   const idx = state.openTabs.indexOf(id);
   if (idx === -1) return;
   state.openTabs.splice(idx, 1);
