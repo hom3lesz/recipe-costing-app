@@ -5570,6 +5570,8 @@ function newRecipe() {
     subRecipes: [],
   };
   state.recipes.push(recipe);
+  if (!state.openTabs) state.openTabs = [];
+  state.openTabs.push(recipe.id);
   state.activeRecipeId = recipe.id;
   recipeSnapshot = null;
   render();
@@ -5639,6 +5641,16 @@ function closeTab(id) {
 }
 
 function selectRecipe(id) {
+  if (!state.openTabs) state.openTabs = [];
+
+  if (!state.openTabs.includes(id)) {
+    if (state.openTabs.length >= 8) {
+      showToast("Close a tab to open another", "warning", 3000);
+      return;
+    }
+    state.openTabs.push(id);
+  }
+
   state.activeRecipeId = id;
   recipeSnapshot = JSON.parse(
     JSON.stringify(state.recipes.find((r) => r.id === id)),
@@ -5649,6 +5661,7 @@ function selectRecipe(id) {
   if (editorPanel) editorPanel.style.display = "flex";
   showView("recipes");
   render();
+  renderTabBar();
   renderRecipeEditor();
 }
 
