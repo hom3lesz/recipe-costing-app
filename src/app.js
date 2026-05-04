@@ -5579,7 +5579,6 @@ function newRecipe() {
   state.activeRecipeId = recipe.id;
   recipeSnapshot = null;
   render();
-  renderTabBar();
   renderRecipeEditor();
   save();
   setTimeout(() => {
@@ -5616,7 +5615,6 @@ function renderTabBar() {
 
 function switchToTab(id) {
   state.activeRecipeId = id;
-  renderTabBar();
   renderRecipeEditor();
 }
 
@@ -5667,7 +5665,6 @@ function selectRecipe(id) {
   if (editorPanel) editorPanel.style.display = "flex";
   showView("recipes");
   render();
-  renderTabBar();
   renderRecipeEditor();
 }
 
@@ -5687,7 +5684,6 @@ function duplicateRecipe(id) {
   state.activeRecipeId = copy.id;
   recipeSnapshot = JSON.parse(JSON.stringify(copy));
   render();
-  renderTabBar();
   renderRecipeEditor();
   save();
   showToast("✓ Duplicated — rename it below", "success", 2000);
@@ -5838,6 +5834,7 @@ function renderRecipeEditor() {
   // (e.g. before an ingredient was added/removed) never bleed into this render.
   invalidateMaps();
   invalidateCostCache();
+  renderTabBar();
   const recipe = getActiveRecipe();
   const editor = document.getElementById("recipe-editor");
   if (!recipe) {
