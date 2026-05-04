@@ -698,6 +698,7 @@ let state = {
   sites: [],
   activeSiteId: null,
   activeRecipeId: null,
+  openTabs: [],
   activeGP: 70,
   customRecipeCategories: [],
   recipeCategories: [],
@@ -4692,6 +4693,7 @@ function saveActiveLocationData() {
   loc.currency = state.currency;
   loc.vatRate = state.vatRate;
   loc.activeRecipeId = state.activeRecipeId;
+  loc.openTabs = state.openTabs ? state.openTabs.slice() : [];
 }
 
 function loadLocationData(locationId) {
@@ -4718,6 +4720,7 @@ function loadLocationData(locationId) {
 
   state.activeLocationId = locationId;
   state.activeRecipeId = null;
+  state.openTabs = [];
 
   if (!locationId) return;
 
@@ -4738,6 +4741,7 @@ function loadLocationData(locationId) {
   // Refresh audit snapshot — the diff must be taken from here on.
   if (window.Audit) _loadSnapshot = window.Audit.buildSnapshot(state);
   state.activeRecipeId = loc.activeRecipeId || null;
+  state.openTabs = loc.openTabs ? loc.openTabs.slice() : [];
 }
 
 function openLocationManager() {
@@ -4903,6 +4907,7 @@ function saveLocationEdit() {
       ingCategories: JSON.parse(JSON.stringify(state.ingCategories || [])),
       foodCostTarget: state.foodCostTarget,
       activeRecipeId: null,
+      openTabs: [],
     };
     state.locations.push(newLoc);
     document.getElementById("loc-edit-modal").classList.add("hidden");
