@@ -5187,6 +5187,7 @@ async function deleteLocation(id) {
     const otherLoc = state.locations.find((l) => l.id !== id);
     state.activeLocationId = null;
     state.activeRecipeId = null;
+    state.openTabs = [];
     if (otherLoc) {
       state.recipes = JSON.parse(JSON.stringify(otherLoc.recipes || []));
       state.ingredients = JSON.parse(
@@ -5581,6 +5582,59 @@ function newRecipe() {
       el.select();
     }
   }, 50);
+}
+
+// ─── Tab Bar ──────────────────────────────────────────────────
+function renderTabBar() {
+  const bar = document.getElementById("recipe-tab-bar");
+  if (!bar) return;
+  const tabs = state.openTabs || [];
+  if (tabs.length === 0) {
+    bar.classList.remove("has-tabs");
+    bar.innerHTML = "";
+    return;
+  }
+  bar.classList.add("has-tabs");
+  bar.innerHTML = tabs.map(id => {
+    const r = state.recipes.find(r => r.id === id);
+    const name = r ? r.name : "Unknown";
+    const truncated = name.length > 22 ? name.slice(0, 22) + "…" : name;
+    const isActive = id === state.activeRecipeId;
+    return `<div class="recipe-tab${isActive ? " active" : ""}" onclick="switchToTab('${id}')">
+      <span class="recipe-tab-name" title="${name.replace(/'/g, "&#39;")}">${truncated}</span>
+      <button class="recipe-tab-close" onclick="event.stopPropagation();closeTab('${id}')" title="Close tab">✕</button>
+    </div>`;
+  }).join("");
+}
+
+function switchToTab(id) {
+  state.activeRecipeId = id;
+  renderTabBar();
+  renderRecipeEditor();
+}
+
+function closeTab(id) {
+  const idx = state.openTabs.indexOf(id);
+  if (idx === -1) return;
+  state.openTabs.splice(idx, 1);
+
+  if (id === state.activeRecipeId) {
+    if (state.openTabs.length === 0) {
+      state.activeRecipeId = null;
+      save();
+      showRecipeList();
+      return;
+    }
+    // Prefer the tab to the left; fall back to the right
+    const newActive = state.openTabs[idx - 1] ?? state.openTabs[idx] ?? state.openTabs[0];
+    state.activeRecipeId = newActive;
+    save();
+    renderTabBar();
+    renderRecipeEditor();
+  } else {
+    save();
+    renderTabBar();
+  }
 }
 
 function selectRecipe(id) {
