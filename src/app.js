@@ -5635,7 +5635,6 @@ function closeTab(id) {
     const newActive = state.openTabs[idx - 1] ?? state.openTabs[idx] ?? state.openTabs[0];
     state.activeRecipeId = newActive;
     save();
-    renderTabBar();
     renderRecipeEditor();
   } else {
     save();
