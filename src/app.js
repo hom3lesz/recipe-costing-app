@@ -5571,6 +5571,10 @@ function newRecipe() {
   };
   state.recipes.push(recipe);
   if (!state.openTabs) state.openTabs = [];
+  if (state.openTabs.length >= 8) {
+    showToast("Close a tab to open another", "warning", 3000);
+    return;
+  }
   state.openTabs.push(recipe.id);
   state.activeRecipeId = recipe.id;
   recipeSnapshot = null;
@@ -5649,6 +5653,7 @@ function selectRecipe(id) {
       return;
     }
     state.openTabs.push(id);
+    save();
   }
 
   state.activeRecipeId = id;
@@ -5672,9 +5677,16 @@ function duplicateRecipe(id) {
   copy.id = uid();
   copy.name = src.name + " (Copy)";
   state.recipes.push(copy);
+  if (!state.openTabs) state.openTabs = [];
+  if (state.openTabs.length >= 8) {
+    showToast("Close a tab to open another", "warning", 3000);
+    return;
+  }
+  state.openTabs.push(copy.id);
   state.activeRecipeId = copy.id;
   recipeSnapshot = JSON.parse(JSON.stringify(copy));
   render();
+  renderTabBar();
   renderRecipeEditor();
   save();
   showToast("✓ Duplicated — rename it below", "success", 2000);
