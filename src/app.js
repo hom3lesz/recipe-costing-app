@@ -5560,6 +5560,11 @@ function newRecipe() {
   const editorPanel = document.getElementById("recipe-editor-panel");
   if (listPanel) listPanel.style.display = "none";
   if (editorPanel) editorPanel.style.display = "flex";
+  if (!state.openTabs) state.openTabs = [];
+  if (state.openTabs.length >= 8) {
+    showToast("Close a tab to open another", "warning", 3000);
+    return;
+  }
   const recipe = {
     id: uid(),
     name: "New Recipe",
@@ -5570,11 +5575,6 @@ function newRecipe() {
     subRecipes: [],
   };
   state.recipes.push(recipe);
-  if (!state.openTabs) state.openTabs = [];
-  if (state.openTabs.length >= 8) {
-    showToast("Close a tab to open another", "warning", 3000);
-    return;
-  }
   state.openTabs.push(recipe.id);
   state.activeRecipeId = recipe.id;
   recipeSnapshot = null;
@@ -5594,7 +5594,7 @@ function newRecipe() {
 function renderTabBar() {
   const bar = document.getElementById("recipe-tab-bar");
   if (!bar) return;
-  const tabs = state.openTabs || [];
+  const tabs = (state.openTabs || []).filter(id => state.recipes.some(r => r.id === id));
   if (tabs.length === 0) {
     bar.classList.remove("has-tabs");
     bar.innerHTML = "";
@@ -5615,6 +5615,9 @@ function renderTabBar() {
 
 function switchToTab(id) {
   state.activeRecipeId = id;
+  const r = state.recipes.find((r) => r.id === id);
+  if (r) recipeSnapshot = JSON.parse(JSON.stringify(r));
+  save();
   renderRecipeEditor();
 }
 
@@ -5673,12 +5676,12 @@ function duplicateRecipe(id) {
   const copy = JSON.parse(JSON.stringify(src));
   copy.id = uid();
   copy.name = src.name + " (Copy)";
-  state.recipes.push(copy);
   if (!state.openTabs) state.openTabs = [];
   if (state.openTabs.length >= 8) {
     showToast("Close a tab to open another", "warning", 3000);
     return;
   }
+  state.recipes.push(copy);
   state.openTabs.push(copy.id);
   state.activeRecipeId = copy.id;
   recipeSnapshot = JSON.parse(JSON.stringify(copy));
@@ -5810,7 +5813,15 @@ async function deleteRecipe(id) {
   );
   if (!confirmed) return;
   state.recipes = state.recipes.filter((r) => r.id !== id);
-  state.activeRecipeId = state.recipes[0]?.id || null;
+  if (state.openTabs) {
+    state.openTabs = state.openTabs.filter((tid) => tid !== id);
+  }
+  if (state.openTabs && state.openTabs.length > 0 && !state.openTabs.includes(state.activeRecipeId)) {
+    state.activeRecipeId = state.openTabs[0];
+  }
+  if (!state.openTabs || state.openTabs.length === 0) {
+    state.activeRecipeId = null;
+  }
   render();
   if (state.activeRecipeId) {
     recipeSnapshot = JSON.parse(
