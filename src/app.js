@@ -5579,6 +5579,7 @@ function newRecipe() {
   state.activeRecipeId = recipe.id;
   recipeSnapshot = null;
   render();
+  renderTabBar();
   renderRecipeEditor();
   save();
   setTimeout(() => {
